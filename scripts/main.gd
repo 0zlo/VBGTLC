@@ -40,6 +40,10 @@ var minimap = null
 var pause_panel: PanelContainer
 var death_panel: PanelContainer
 var session_footer: Label
+var join_debug_panel: PanelContainer
+var join_debug_label: RichTextLabel
+var join_debug_visible := false
+var join_debug_preview_mode := false
 
 func _ready() -> void:
 	GameState.start_session()
@@ -70,6 +74,7 @@ func _process(delta: float) -> void:
 		if autosave_timer <= 0.0 and not get_tree().paused:
 			_snapshot_and_save()
 			autosave_timer = 1.5
+	_refresh_join_debug_ui()
 
 func _unhandled_input(_event: InputEvent) -> void:
 	if Input.is_action_just_pressed("pause"):
@@ -77,6 +82,12 @@ func _unhandled_input(_event: InputEvent) -> void:
 			_toggle_pause()
 	elif Input.is_action_just_pressed("toggle_map") and current_mode == "dungeon":
 		map_visible = not map_visible
+	elif Input.is_action_just_pressed("toggle_join_debug") and current_mode == "dungeon":
+		_set_join_debug_visible(not join_debug_visible)
+		_show_notification("Corridor join debug %s." % ("enabled" if join_debug_visible else "disabled"))
+	elif Input.is_action_just_pressed("print_join_debug") and current_mode == "dungeon":
+		_emit_join_debug_log(_current_join_debug_data(), true)
+		_show_notification("Corridor join report emitted to log.")
 	elif Input.is_action_just_pressed("toggle_godmode") and current_mode in ["hub", "dungeon"] and player:
 		player.toggle_god_mode()
 
@@ -193,6 +204,11 @@ func _build_ui() -> void:
 	new_button.pressed.connect(_on_new_run_pressed)
 	button_row.add_child(new_button)
 
+	var debug_button := Button.new()
+	debug_button.text = "Inspect Joins"
+	debug_button.pressed.connect(_on_debug_preview_pressed)
+	button_row.add_child(debug_button)
+
 	continue_button = Button.new()
 	continue_button.text = "Continue Run"
 	continue_button.disabled = not GameState.has_save()
@@ -208,7 +224,7 @@ func _build_ui() -> void:
 
 	var controls := Label.new()
 	controls.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	controls.text = "Controls: WASD move, Shift sprint or descend in godmode, Space jump or ascend in godmode, E interact, Left Mouse melee, Right Mouse continuity pulse, Q tonic, F aether, Tab minimap, F10 godmode, Esc pause."
+	controls.text = "Controls: WASD move, Shift sprint or descend in godmode, Space jump or ascend in godmode, E interact, Left Mouse melee, Right Mouse continuity pulse, Q tonic, F aether, Tab minimap, F3 join debug, F4 print join report, F10 godmode, Esc pause. Inspect Joins enters a reproducible debug preview for the current seed."
 	controls.add_theme_color_override("font_color", Color(0.74, 0.8, 0.84))
 	menu_vbox.add_child(controls)
 
@@ -291,6 +307,34 @@ func _build_ui() -> void:
 	notification_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	notification_label.text = ""
 	hud_root.add_child(notification_label)
+
+	join_debug_panel = PanelContainer.new()
+	join_debug_panel.anchor_left = 0.0
+	join_debug_panel.anchor_top = 1.0
+	join_debug_panel.anchor_right = 0.0
+	join_debug_panel.anchor_bottom = 1.0
+	join_debug_panel.offset_left = 18.0
+	join_debug_panel.offset_top = -282.0
+	join_debug_panel.offset_right = 490.0
+	join_debug_panel.offset_bottom = -18.0
+	join_debug_panel.visible = false
+	join_debug_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_apply_panel_style(join_debug_panel, Color(0.05, 0.08, 0.1, 0.9), Color(0.4, 0.64, 0.7, 0.95))
+	hud_root.add_child(join_debug_panel)
+
+	var join_debug_margin := MarginContainer.new()
+	join_debug_margin.add_theme_constant_override("margin_left", 16)
+	join_debug_margin.add_theme_constant_override("margin_top", 14)
+	join_debug_margin.add_theme_constant_override("margin_right", 16)
+	join_debug_margin.add_theme_constant_override("margin_bottom", 14)
+	join_debug_panel.add_child(join_debug_margin)
+
+	join_debug_label = RichTextLabel.new()
+	join_debug_label.bbcode_enabled = true
+	join_debug_label.scroll_active = true
+	join_debug_label.fit_content = false
+	join_debug_label.custom_minimum_size = Vector2(0.0, 228.0)
+	join_debug_margin.add_child(join_debug_label)
 
 	pause_panel = _build_overlay_panel(root, "Pause", "state continuity held in temporary suspension")
 	var pause_buttons := pause_panel.get_child(0).get_child(0) as VBoxContainer
@@ -386,6 +430,8 @@ func _apply_panel_style(panel: PanelContainer, fill: Color, border: Color) -> vo
 
 func _show_main_menu() -> void:
 	current_mode = "menu"
+	join_debug_preview_mode = false
+	join_debug_visible = false
 	menu_panel.visible = true
 	hud_root.visible = false
 	pause_panel.visible = false
@@ -401,13 +447,23 @@ func _show_main_menu() -> void:
 func _on_new_run_pressed() -> void:
 	current_run_state = GameState.make_run_state(seed_input.text)
 	current_run_state["last_status"] = "geometry integrity nominal"
+	join_debug_preview_mode = false
+	join_debug_visible = false
 	_enter_hub(false)
+
+func _on_debug_preview_pressed() -> void:
+	current_run_state = GameState.make_run_state(seed_input.text)
+	current_run_state["last_status"] = "corridor join inspection queued"
+	join_debug_preview_mode = true
+	join_debug_visible = true
+	_enter_dungeon(false)
 
 func _on_continue_pressed() -> void:
 	var loaded := GameState.load_run()
 	if loaded.is_empty():
 		return
 	current_run_state = loaded
+	join_debug_preview_mode = false
 	GameState.set_seed_text(str(current_run_state.get("seed_text", GameState.current_seed_text)))
 	if str(current_run_state.get("mode", "hub")) == "dungeon":
 		_enter_dungeon(true)
@@ -422,6 +478,8 @@ func _enter_hub(from_save: bool) -> void:
 	get_tree().paused = false
 	current_mode = "hub"
 	map_visible = false
+	join_debug_preview_mode = false
+	join_debug_visible = false
 	current_run_state["mode"] = "hub"
 	current_run_state["last_status"] = "staging room loaded correctly"
 	_clear_play_world()
@@ -437,6 +495,7 @@ func _enter_hub(from_save: bool) -> void:
 		player.camera.rotation.x = 0.0
 	player.set_gameplay_enabled(true)
 	minimap.set_layout({})
+	_refresh_join_debug_ui()
 	_snapshot_and_save()
 	_show_notification("Hub staging aligned. Seed queued: %s" % current_run_state.get("seed_text", ""))
 
@@ -549,6 +608,7 @@ func _enter_dungeon(from_save: bool) -> void:
 	dungeon_runtime.goal_activated.connect(_on_goal_activated)
 	dungeon_runtime.notification.connect(_show_notification)
 	dungeon_runtime.setup(current_layout, current_run_state)
+	dungeon_runtime.set_join_debug_visible(join_debug_visible)
 	minimap.set_layout(current_layout)
 	minimap.set_discovery(current_run_state.get("discovered_rooms", []), current_run_state.get("discovered_corridors", []))
 
@@ -560,12 +620,20 @@ func _enter_dungeon(from_save: bool) -> void:
 		player.yaw = 0.0
 		player.rotation.y = 0.0
 		player.camera.rotation.x = 0.0
+	if join_debug_preview_mode and not player.god_mode:
+		player.toggle_god_mode()
 	player.set_gameplay_enabled(true)
 	dungeon_runtime.update_discovery(player.global_position)
 	minimap.set_discovery(current_run_state.get("discovered_rooms", []), current_run_state.get("discovered_corridors", []))
-	current_run_state["last_status"] = "vault loaded correctly"
+	_refresh_join_debug_ui()
+	_emit_join_debug_log(_current_join_debug_data(), join_debug_preview_mode)
+	if join_debug_preview_mode:
+		current_run_state["last_status"] = "corridor join inspection active"
+		_show_notification("Corridor join inspection active. F3 toggles gizmos. F4 prints the full report.")
+	else:
+		current_run_state["last_status"] = "vault loaded correctly"
+		_show_notification("Vault loaded correctly. Deviation monitoring active.")
 	_snapshot_and_save()
-	_show_notification("Vault loaded correctly. Deviation monitoring active.")
 
 func _spawn_player() -> void:
 	player = PlayerControllerClass.new()
@@ -634,6 +702,8 @@ func _on_player_died() -> void:
 func _restart_seed() -> void:
 	get_tree().paused = false
 	current_run_state = GameState.make_run_state(str(current_run_state.get("seed_text", GameState.current_seed_text)))
+	join_debug_preview_mode = false
+	join_debug_visible = false
 	death_panel.visible = false
 	_enter_hub(false)
 
@@ -671,6 +741,8 @@ func _on_hub_terminal_activated(_terminal_id: String) -> void:
 func _snapshot_and_save() -> void:
 	if current_mode not in ["hub", "dungeon"] or player == null:
 		return
+	if join_debug_preview_mode:
+		return
 	current_run_state["player"] = player.export_player_state()
 	current_run_state["inventory"] = player.get_inventory_state()
 	current_run_state["mode"] = current_mode
@@ -690,6 +762,7 @@ func _clear_play_world() -> void:
 	dungeon_runtime = null
 	hub_terminal = null
 	current_layout = {}
+	_refresh_join_debug_ui()
 
 func _ensure_input_actions() -> void:
 	_add_action_key("move_forward", KEY_W)
@@ -706,6 +779,8 @@ func _ensure_input_actions() -> void:
 	_add_action_key("use_tonic", KEY_Q)
 	_add_action_key("use_aether", KEY_F)
 	_add_action_key("toggle_map", KEY_TAB)
+	_add_action_key("toggle_join_debug", KEY_F3)
+	_add_action_key("print_join_debug", KEY_F4)
 	_add_action_key("toggle_godmode", KEY_F10)
 	_add_action_key("pause", KEY_ESCAPE)
 	_add_action_mouse("attack_melee", MOUSE_BUTTON_LEFT)
@@ -730,3 +805,159 @@ func _add_action_mouse(action: StringName, button_index: MouseButton) -> void:
 	var mouse_event := InputEventMouseButton.new()
 	mouse_event.button_index = button_index
 	InputMap.action_add_event(action, mouse_event)
+
+func _set_join_debug_visible(enabled: bool) -> void:
+	join_debug_visible = enabled
+	if dungeon_runtime:
+		dungeon_runtime.set_join_debug_visible(enabled and current_mode == "dungeon")
+	_refresh_join_debug_ui()
+
+func _refresh_join_debug_ui() -> void:
+	if join_debug_panel == null or join_debug_label == null:
+		return
+	var show_debug := current_mode == "dungeon" and join_debug_visible and not _current_join_debug_data().is_empty()
+	join_debug_panel.visible = show_debug
+	if dungeon_runtime:
+		dungeon_runtime.set_join_debug_visible(show_debug)
+	if show_debug:
+		join_debug_label.text = _build_join_debug_text(_current_join_debug_data())
+	else:
+		join_debug_label.text = ""
+
+func _current_join_debug_data() -> Dictionary:
+	if dungeon_runtime:
+		return dungeon_runtime.get_join_debug_data()
+	return current_layout.get("debug", {})
+
+func _build_join_debug_text(debug_data: Dictionary) -> String:
+	if debug_data.is_empty():
+		return "[b]Corridor Join Debug[/b]\nNo debug data loaded."
+	var summary: Dictionary = debug_data.get("summary", {})
+	var lines: Array = []
+	lines.append("[b]Corridor Join Debug[/b] [color=#9fc9d6]F3 toggle | F4 print[/color]")
+	lines.append(
+		"Seed [color=#bce7ef]%s[/color] | corridors %d | joins %d | suspicious %d | failed %d" % [
+			str(current_run_state.get("seed_text", GameState.current_seed_text)),
+			int(summary.get("corridor_count", 0)),
+			int(summary.get("join_count", 0)),
+			int(summary.get("suspicious_count", 0)),
+			int(summary.get("failed_count", 0))
+		]
+	)
+	lines.append("Legend: [color=#57e58f]ok[/color] [color=#ffc343]suspicious[/color] [color=#ff6456]failed[/color] [color=#66e9ff]room span[/color] [color=#9c6eff]edge[/color] [color=#9eff83]corridor span[/color]")
+	var suspicious_joins: Array = debug_data.get("suspicious_joins", [])
+	if suspicious_joins.is_empty():
+		lines.append("No suspicious corridor joins detected for this seed.")
+		return _join_strings(lines, "\n")
+	lines.append("")
+	lines.append("[b]Suspicious Joins[/b]")
+	var limit: int = min(suspicious_joins.size(), 8)
+	for index in range(limit):
+		var join: Dictionary = suspicious_joins[index]
+		var color: String = _join_status_color_bbcode(str(join.get("status", "ok")))
+		lines.append(
+			"[color=%s]corridor %02d %s -> room %02d[/color]" % [
+				color,
+				int(join.get("corridor_id", -1)),
+				str(join.get("end_key", "end")),
+				int(join.get("connected_room_id", -1))
+			]
+		)
+		lines.append(
+			"anchor %s | room %s/%s | corridor %s/%s | %s" % [
+				_format_vector2(join.get("anchor_point", Vector2.ZERO)),
+				"registered" if bool(join.get("room_opening_registered", false)) else "missing",
+				"carveable" if bool(join.get("room_opening_carveable", false)) else "blocked",
+				"marked" if bool(join.get("corridor_end_marked", false)) else "missing",
+				"carveable" if bool(join.get("corridor_end_carveable", false)) else "blocked",
+				_join_edge_summary(join)
+			]
+		)
+		lines.append(_format_reason_line(join.get("reasons", [])))
+		lines.append("")
+	if suspicious_joins.size() > limit:
+		lines.append("... %d more suspicious joins in log output." % int(suspicious_joins.size() - limit))
+	return _join_strings(lines, "\n")
+
+func _emit_join_debug_log(debug_data: Dictionary, verbose: bool) -> void:
+	if debug_data.is_empty():
+		print("[JoinDebug] no debug data loaded")
+		return
+	var summary: Dictionary = debug_data.get("summary", {})
+	print(
+		"[JoinDebug] seed=%s corridors=%d joins=%d suspicious=%d failed=%d" % [
+			str(current_run_state.get("seed_text", GameState.current_seed_text)),
+			int(summary.get("corridor_count", 0)),
+			int(summary.get("join_count", 0)),
+			int(summary.get("suspicious_count", 0)),
+			int(summary.get("failed_count", 0))
+		]
+	)
+	var joins: Array = debug_data.get("corridor_joins", [])
+	var suspicious_joins: Array = debug_data.get("suspicious_joins", [])
+	var target: Array = joins if verbose else suspicious_joins
+	for join_variant in target:
+		var join: Dictionary = join_variant
+		print(_format_join_log_line(join))
+
+func _format_join_log_line(join: Dictionary) -> String:
+	var inferred_edge: Dictionary = join.get("inferred_room_edge", {})
+	var edge_index := int(inferred_edge.get("edge_index", -1))
+	var edge_length := float(inferred_edge.get("edge_length", 0.0))
+	var edge_distance := float(inferred_edge.get("distance", -1.0))
+	var corner_clearance := float(inferred_edge.get("corner_clearance", -1.0))
+	return (
+		"[JoinDebug] %s corridor=%d end=%s room=%d anchor=%s room_registered=%s room_carveable=%s corridor_marked=%s corridor_carveable=%s edge=%s wall_len=%.2f dist=%.2f corner=%.2f reasons=%s"
+		% [
+			str(join.get("status", "ok")).to_upper(),
+			int(join.get("corridor_id", -1)),
+			str(join.get("end_key", "end")),
+			int(join.get("connected_room_id", -1)),
+			_format_vector2(join.get("anchor_point", Vector2.ZERO)),
+			str(bool(join.get("room_opening_registered", false))),
+			str(bool(join.get("room_opening_carveable", false))),
+			str(bool(join.get("corridor_end_marked", false))),
+			str(bool(join.get("corridor_end_carveable", false))),
+			"?" if edge_index < 0 else str(edge_index),
+			edge_length,
+			edge_distance,
+			corner_clearance,
+			_join_strings(join.get("reasons", []), "; ")
+		]
+	)
+
+func _format_reason_line(reasons: Array) -> String:
+	if reasons.is_empty():
+		return "reasons: none"
+	return "reasons: %s" % _join_strings(reasons, ", ")
+
+func _join_edge_summary(join: Dictionary) -> String:
+	var inferred_edge: Dictionary = join.get("inferred_room_edge", {})
+	if inferred_edge.is_empty():
+		return "edge ?"
+	return "edge %s | wall %.2f | dist %.2f" % [
+		str(inferred_edge.get("edge_index", "?")),
+		float(inferred_edge.get("edge_length", 0.0)),
+		float(inferred_edge.get("distance", 0.0))
+	]
+
+func _join_status_color_bbcode(status: String) -> String:
+	match status:
+		"failed":
+			return "#ff6456"
+		"suspicious":
+			return "#ffc343"
+		_:
+			return "#57e58f"
+
+func _format_vector2(value: Variant) -> String:
+	var point: Vector2 = value if value is Vector2 else Vector2.ZERO
+	return "(%.2f, %.2f)" % [point.x, point.y]
+
+func _join_strings(values: Array, separator: String) -> String:
+	var parts: String = ""
+	for index in range(values.size()):
+		if index > 0:
+			parts += separator
+		parts += str(values[index])
+	return parts

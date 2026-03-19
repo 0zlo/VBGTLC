@@ -62,6 +62,8 @@ Vault of Bent Geometry That Loads Correctly (VBGTLC) is a Godot 4 vertical slice
 - `Q`: use tonic
 - `F`: use aether charge
 - `Tab`: toggle minimap
+- `F3`: toggle corridor join debug gizmos and report panel
+- `F4`: print the full corridor join report to the Godot log
 - `F10`: toggle godmode
 - `Esc`: pause
 
@@ -71,6 +73,15 @@ Godmode notes:
 - raises movement speed
 - `Space` flies up
 - `Shift` flies down
+
+## Corridor Join Debugging
+
+- Use the title-screen seed field or sample seeds, then press `Inspect Joins` to enter a reproducible corridor-join preview for that seed.
+- The preview goes straight into the generated dungeon, enables godmode, and does not overwrite the active save.
+- Press `F3` in a dungeon run to toggle join-debug gizmos and the on-screen report panel.
+- Press `F4` to print the full join validation report to the Godot console/log.
+- The debug view renders corridor centerlines, endpoint anchors, inferred room-wall edges, room opening spans, corridor end spans, and marks suspicious or failed joins in warmer colors.
+- Validation output reports missing openings, corner-hugging portals, implausible edge matches, and corridors that appear wider than their host wall segment.
 
 ## Sample Seeds
 

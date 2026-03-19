@@ -94,6 +94,53 @@ static func build_area_mesh(area: Dictionary) -> ArrayMesh:
 	_add_walls(st, polygon, area)
 	return st.commit()
 
+static func inspect_wall_openings(polygon: PackedVector2Array, wall_openings: Array) -> Dictionary:
+	var normalized_polygon: PackedVector2Array = ensure_ccw(polygon)
+	var edge_reports: Array = []
+	var opening_reports: Array = []
+	for edge_index in normalized_polygon.size():
+		var point_a: Vector2 = normalized_polygon[edge_index]
+		var point_b: Vector2 = normalized_polygon[(edge_index + 1) % normalized_polygon.size()]
+		edge_reports.append({
+			"edge_index": edge_index,
+			"from": point_a,
+			"to": point_b,
+			"length": point_a.distance_to(point_b),
+			"accepted_matches": []
+		})
+	for opening_index in wall_openings.size():
+		var opening_data: Dictionary = wall_openings[opening_index]
+		var best_match: Dictionary = {}
+		var accepted_matches: Array = []
+		for edge_index in edge_reports.size():
+			var edge_report: Dictionary = edge_reports[edge_index]
+			var match_report: Dictionary = _inspect_opening_on_edge(
+				edge_report.get("from", Vector2.ZERO),
+				edge_report.get("to", Vector2.ZERO),
+				opening_data,
+				int(edge_report.get("edge_index", edge_index))
+			)
+			if best_match.is_empty() or float(match_report.get("distance", INF)) < float(best_match.get("distance", INF)):
+				best_match = match_report
+			if bool(match_report.get("accepted", false)):
+				accepted_matches.append(match_report)
+				var edge_matches: Array = edge_report.get("accepted_matches", [])
+				edge_matches.append(match_report)
+				edge_report["accepted_matches"] = edge_matches
+				edge_reports[edge_index] = edge_report
+		var opening_report: Dictionary = opening_data.duplicate(true)
+		opening_report["opening_index"] = opening_index
+		opening_report["best_match"] = best_match
+		opening_report["accepted_matches"] = accepted_matches
+		opening_report["accepted"] = accepted_matches.size() > 0
+		opening_report["accepted_edge_indices"] = _collect_match_edge_indices(accepted_matches)
+		opening_reports.append(opening_report)
+	return {
+		"polygon": normalized_polygon,
+		"edges": edge_reports,
+		"openings": opening_reports
+	}
+
 static func area_floor_height(area: Dictionary, point: Vector2) -> float:
 	var base_y := float(area.get("base_y", 0.0))
 	var mode := str(area.get("height_mode", "flat"))
@@ -134,22 +181,21 @@ static func _add_ceiling(st: SurfaceTool, polygon: PackedVector2Array, area: Dic
 static func _add_walls(st: SurfaceTool, polygon: PackedVector2Array, area: Dictionary) -> void:
 	var ceiling_height := float(area.get("ceiling_height", 4.4))
 	var wall_openings: Array = area.get("wall_openings", [])
-	for index in polygon.size():
-		var point_a: Vector2 = polygon[index]
-		var point_b: Vector2 = polygon[(index + 1) % polygon.size()]
+	var opening_analysis: Dictionary = inspect_wall_openings(polygon, wall_openings)
+	for edge_report_variant in opening_analysis.get("edges", []):
+		var edge_report: Dictionary = edge_report_variant
+		var point_a: Vector2 = edge_report.get("from", Vector2.ZERO)
+		var point_b: Vector2 = edge_report.get("to", Vector2.ZERO)
 		var edge_length := point_a.distance_to(point_b)
 		if edge_length < 0.05:
 			continue
 		var opening_ranges: Array = []
-		for opening_data in wall_openings:
-			var opening_point: Vector2 = opening_data.get("point", point_a)
-			var opening_width: float = float(opening_data.get("width", 3.0))
-			var opening_t: float = _segment_t(point_a, point_b, opening_point)
-			var nearest_point: Vector2 = point_a.lerp(point_b, opening_t)
-			if nearest_point.distance_to(opening_point) > 0.55:
-				continue
-			var half_t: float = clamp(opening_width * 0.5 / edge_length, 0.04, 0.45)
-			opening_ranges.append([max(0.0, opening_t - half_t), min(1.0, opening_t + half_t)])
+		for match_report_variant in edge_report.get("accepted_matches", []):
+			var match_report: Dictionary = match_report_variant
+			opening_ranges.append([
+				float(match_report.get("span_start_t", 0.0)),
+				float(match_report.get("span_end_t", 0.0))
+			])
 		opening_ranges.sort_custom(func(a, b): return a[0] < b[0])
 		var cursor: float = 0.0
 		for opening_range in opening_ranges:
@@ -177,6 +223,44 @@ static func _segment_t(from_point: Vector2, to_point: Vector2, point: Vector2) -
 	if length_squared <= 0.0001:
 		return 0.0
 	return clamp((point - from_point).dot(axis) / length_squared, 0.0, 1.0)
+
+static func _inspect_opening_on_edge(from_point: Vector2, to_point: Vector2, opening_data: Dictionary, edge_index: int) -> Dictionary:
+	var edge_length := from_point.distance_to(to_point)
+	var opening_point: Vector2 = opening_data.get("point", from_point)
+	var opening_width: float = float(opening_data.get("width", 3.0))
+	var opening_t: float = _segment_t(from_point, to_point, opening_point)
+	var nearest_point: Vector2 = from_point.lerp(to_point, opening_t)
+	var distance: float = nearest_point.distance_to(opening_point)
+	var half_t: float = clamp(opening_width * 0.5 / max(edge_length, 0.001), 0.04, 0.45)
+	var span_start_t: float = max(0.0, opening_t - half_t)
+	var span_end_t: float = min(1.0, opening_t + half_t)
+	var corner_clearance: float = min(opening_t, 1.0 - opening_t) * edge_length
+	return {
+		"edge_index": edge_index,
+		"edge_from": from_point,
+		"edge_to": to_point,
+		"edge_length": edge_length,
+		"opening_t": opening_t,
+		"nearest_point": nearest_point,
+		"distance": distance,
+		"accepted": distance <= 0.55 and edge_length > 0.05,
+		"half_t": half_t,
+		"span_start_t": span_start_t,
+		"span_end_t": span_end_t,
+		"span_from": from_point.lerp(to_point, span_start_t),
+		"span_to": from_point.lerp(to_point, span_end_t),
+		"corner_clearance": corner_clearance,
+		"width_ratio": opening_width / max(edge_length, 0.001)
+	}
+
+static func _collect_match_edge_indices(match_reports: Array) -> Array:
+	var indices: Array = []
+	for match_report_variant in match_reports:
+		var match_report: Dictionary = match_report_variant
+		var edge_index := int(match_report.get("edge_index", -1))
+		if edge_index >= 0 and not indices.has(edge_index):
+			indices.append(edge_index)
+	return indices
 
 static func _add_triangle(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3) -> void:
 	var normal := (b - a).cross(c - a).normalized()

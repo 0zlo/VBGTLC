@@ -6,6 +6,7 @@ const DoorNodeClass = preload("res://scripts/door_node.gd")
 const PickupNodeClass = preload("res://scripts/pickup_node.gd")
 const EnemyAgentClass = preload("res://scripts/enemy_agent.gd")
 const InteractionTerminalClass = preload("res://scripts/interaction_terminal.gd")
+const CorridorJoinDebugViewClass = preload("res://scripts/corridor_join_debug_view.gd")
 
 signal run_state_changed
 signal goal_activated
@@ -18,10 +19,13 @@ var player = null
 var geometry_root: Node3D
 var entities_root: Node3D
 var props_root: Node3D
+var debug_root: Node3D
 
 var doors: Dictionary = {}
 var current_room_id := -1
 var current_corridor_id := -1
+var join_debug_visible := false
+var join_debug_view = null
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_PAUSABLE
@@ -82,6 +86,10 @@ func _ensure_roots() -> void:
 		props_root = Node3D.new()
 		props_root.name = "Props"
 		add_child(props_root)
+	if debug_root == null:
+		debug_root = Node3D.new()
+		debug_root.name = "Debug"
+		add_child(debug_root)
 
 func _ensure_state_arrays() -> void:
 	for key in ["discovered_rooms", "discovered_corridors", "opened_doors", "unlocked_doors", "collected_pickups", "defeated_enemies"]:
@@ -95,13 +103,17 @@ func _rebuild() -> void:
 		child.queue_free()
 	for child in props_root.get_children():
 		child.queue_free()
+	for child in debug_root.get_children():
+		child.queue_free()
 	doors.clear()
+	join_debug_view = null
 	_build_rooms()
 	_build_corridors()
 	_build_doors()
 	_build_pickups()
 	_build_enemies()
 	_build_goal_terminal()
+	_build_join_debug_view()
 
 func _build_rooms() -> void:
 	for room in layout.get("rooms", []):
@@ -178,6 +190,16 @@ func _build_goal_terminal() -> void:
 	pedestal.material_override = pedestal_material
 	props_root.add_child(pedestal)
 
+func _build_join_debug_view() -> void:
+	var debug_data: Dictionary = layout.get("debug", {})
+	if debug_data.is_empty():
+		return
+	join_debug_view = CorridorJoinDebugViewClass.new()
+	join_debug_view.name = "CorridorJoinDebug"
+	join_debug_view.setup(layout)
+	join_debug_view.visible = join_debug_visible
+	debug_root.add_child(join_debug_view)
+
 func _add_room_light(room: Dictionary, theme: Dictionary) -> void:
 	var light := OmniLight3D.new()
 	light.omni_range = 14.0
@@ -188,6 +210,14 @@ func _add_room_light(room: Dictionary, theme: Dictionary) -> void:
 
 func _theme(theme_id: String) -> Dictionary:
 	return layout.get("themes", {}).get(theme_id, layout.get("themes", {}).get("integrity", {}))
+
+func set_join_debug_visible(enabled: bool) -> void:
+	join_debug_visible = enabled
+	if join_debug_view:
+		join_debug_view.visible = enabled
+
+func get_join_debug_data() -> Dictionary:
+	return layout.get("debug", {})
 
 func _on_pickup_collected(pickup_id: int, _kind: String, _amount: int) -> void:
 	GameState.add_unique_int(run_state["collected_pickups"], pickup_id)

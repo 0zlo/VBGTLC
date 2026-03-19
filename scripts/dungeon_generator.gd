@@ -93,6 +93,7 @@ func generate(seed_value: int) -> Dictionary:
 	var pickups := _make_pickups(rng, rooms, key_room_id, goal_room_id)
 	var enemies := _make_enemies(rng, rooms, goal_room_id)
 	_ensure_early_enemy(rng, rooms, corridors, enemies)
+	var debug_data := _build_join_debug(seed_value, rooms, corridors)
 
 	var entry_spawn := _sample_point_in_room(rng, _find_room(rooms, 0), false, true)
 	var goal_terminal := _sample_point_in_room(rng, _find_room(rooms, goal_room_id), true, false)
@@ -105,6 +106,7 @@ func generate(seed_value: int) -> Dictionary:
 		"doors": doors,
 		"pickups": pickups,
 		"enemies": enemies,
+		"debug": debug_data,
 		"entry_spawn": entry_spawn,
 		"goal_room_id": goal_room_id,
 		"key_room_id": key_room_id,
@@ -287,11 +289,21 @@ func _make_corridor(rng: RandomNumberGenerator, corridor_id: int, room_a: Dictio
 		"wall_openings": [
 			{
 				"point": start_point,
-				"width": width + 1.0
+				"width": width + 1.0,
+				"opening_kind": "corridor_end",
+				"source_corridor_id": corridor_id,
+				"source_end": "start",
+				"connected_room_id": int(room_a["id"]),
+				"host_corridor_id": corridor_id
 			},
 			{
 				"point": end_point,
-				"width": width + 1.0
+				"width": width + 1.0,
+				"opening_kind": "corridor_end",
+				"source_corridor_id": corridor_id,
+				"source_end": "end",
+				"connected_room_id": int(room_b["id"]),
+				"host_corridor_id": corridor_id
 			}
 		]
 	}
@@ -472,10 +484,26 @@ func _register_room_openings(rooms: Array, corridors: Array) -> void:
 	for room in rooms:
 		room["wall_openings"] = []
 	for corridor in corridors:
-		_append_room_opening(rooms, int(corridor["room_a"]), corridor["start_anchor"], float(corridor["width"]) + 0.9)
-		_append_room_opening(rooms, int(corridor["room_b"]), corridor["end_anchor"], float(corridor["width"]) + 0.9)
+		_append_room_opening(
+			rooms,
+			int(corridor["room_a"]),
+			int(corridor["id"]),
+			"start",
+			corridor["start_anchor"],
+			float(corridor["width"]) + 0.9,
+			int(corridor["room_b"])
+		)
+		_append_room_opening(
+			rooms,
+			int(corridor["room_b"]),
+			int(corridor["id"]),
+			"end",
+			corridor["end_anchor"],
+			float(corridor["width"]) + 0.9,
+			int(corridor["room_a"])
+		)
 
-func _append_room_opening(rooms: Array, room_id: int, point: Vector2, width: float) -> void:
+func _append_room_opening(rooms: Array, room_id: int, corridor_id: int, end_key: String, point: Vector2, width: float, connected_room_id: int) -> void:
 	var room := _find_room(rooms, room_id)
 	if room.is_empty():
 		return
@@ -483,8 +511,169 @@ func _append_room_opening(rooms: Array, room_id: int, point: Vector2, width: flo
 		room["wall_openings"] = []
 	room["wall_openings"].append({
 		"point": point,
-		"width": width
+		"width": width,
+		"opening_kind": "room_join",
+		"source_corridor_id": corridor_id,
+		"source_end": end_key,
+		"host_room_id": room_id,
+		"connected_room_id": connected_room_id
 	})
+
+func _build_join_debug(seed_value: int, rooms: Array, corridors: Array) -> Dictionary:
+	var room_analysis_by_id: Dictionary = {}
+	var corridor_analysis_by_id: Dictionary = {}
+	var room_analyses: Array = []
+	var corridor_analyses: Array = []
+	var room_openings: Array = []
+	var corridor_openings: Array = []
+	var joins: Array = []
+	var suspicious_joins: Array = []
+	var failed_count := 0
+	for room in rooms:
+		var room_id := int(room["id"])
+		var analysis: Dictionary = GeometryBuilderClass.inspect_wall_openings(room["polygon"], room.get("wall_openings", []))
+		room_analysis_by_id[room_id] = analysis
+		room_analyses.append({
+			"host_type": "room",
+			"host_id": room_id,
+			"analysis": analysis
+		})
+		for opening_report_variant in analysis.get("openings", []):
+			var opening_report: Dictionary = opening_report_variant.duplicate(true)
+			opening_report["host_type"] = "room"
+			opening_report["host_id"] = room_id
+			room_openings.append(opening_report)
+	for corridor in corridors:
+		var corridor_id := int(corridor["id"])
+		var analysis: Dictionary = GeometryBuilderClass.inspect_wall_openings(corridor["polygon"], corridor.get("wall_openings", []))
+		corridor_analysis_by_id[corridor_id] = analysis
+		corridor_analyses.append({
+			"host_type": "corridor",
+			"host_id": corridor_id,
+			"analysis": analysis
+		})
+		for opening_report_variant in analysis.get("openings", []):
+			var opening_report: Dictionary = opening_report_variant.duplicate(true)
+			opening_report["host_type"] = "corridor"
+			opening_report["host_id"] = corridor_id
+			corridor_openings.append(opening_report)
+	for corridor in corridors:
+		var start_join := _build_join_report(corridor, "start", room_analysis_by_id, corridor_analysis_by_id)
+		var end_join := _build_join_report(corridor, "end", room_analysis_by_id, corridor_analysis_by_id)
+		joins.append(start_join)
+		joins.append(end_join)
+		if str(start_join.get("status", "ok")) != "ok":
+			suspicious_joins.append(start_join)
+		if str(end_join.get("status", "ok")) != "ok":
+			suspicious_joins.append(end_join)
+	for join_variant in joins:
+		var join_report: Dictionary = join_variant
+		if str(join_report.get("status", "ok")) == "failed":
+			failed_count += 1
+	var summary := {
+		"seed_value": seed_value,
+		"corridor_count": corridors.size(),
+		"join_count": joins.size(),
+		"suspicious_count": suspicious_joins.size(),
+		"failed_count": failed_count
+	}
+	return {
+		"summary": summary,
+		"corridor_joins": joins,
+		"suspicious_joins": suspicious_joins,
+		"room_analyses": room_analyses,
+		"corridor_analyses": corridor_analyses,
+		"room_openings": room_openings,
+		"corridor_openings": corridor_openings
+	}
+
+func _build_join_report(corridor: Dictionary, end_key: String, room_analysis_by_id: Dictionary, corridor_analysis_by_id: Dictionary) -> Dictionary:
+	var is_start := end_key == "start"
+	var corridor_id := int(corridor["id"])
+	var room_id := int(corridor["room_a"] if is_start else corridor["room_b"])
+	var anchor: Vector2 = corridor["start_anchor"] if is_start else corridor["end_anchor"]
+	var intended_room_width := float(corridor["width"]) + 0.9
+	var corridor_analysis: Dictionary = corridor_analysis_by_id.get(corridor_id, {})
+	var room_analysis: Dictionary = room_analysis_by_id.get(room_id, {})
+	var room_opening_report := _find_opening_report(room_analysis.get("openings", []), corridor_id, end_key, "room_join")
+	var corridor_opening_report := _find_opening_report(corridor_analysis.get("openings", []), corridor_id, end_key, "corridor_end")
+	var best_match: Dictionary = room_opening_report.get("best_match", {})
+	var reasons: Array = []
+	var room_opening_registered := not room_opening_report.is_empty()
+	var corridor_end_marked := not corridor_opening_report.is_empty()
+	var room_carveable := bool(room_opening_report.get("accepted", false))
+	var corridor_carveable := bool(corridor_opening_report.get("accepted", false))
+	if not room_opening_registered:
+		reasons.append("no opening registered on room side")
+	if not corridor_end_marked:
+		reasons.append("corridor did not mark its own end opening")
+	if not room_carveable and not corridor_carveable:
+		reasons.append("no opening registered on either side")
+	elif not room_carveable or not corridor_carveable:
+		reasons.append("no opening registered on one side")
+	if not best_match.is_empty():
+		if float(best_match.get("corner_clearance", 999.0)) < max(0.45, intended_room_width * 0.35):
+			reasons.append("opening too close to a room corner")
+		if float(best_match.get("distance", 999.0)) > 0.55 or int(room_opening_report.get("accepted_edge_indices", []).size()) != 1:
+			reasons.append("opening mapped to an implausible wall edge")
+		if intended_room_width > float(best_match.get("edge_length", 0.0)) * 0.9:
+			reasons.append("corridor width too large for the host wall segment")
+	else:
+		reasons.append("no inferred room edge")
+	var status := "ok"
+	if reasons.has("no opening registered on either side") or reasons.has("no inferred room edge"):
+		status = "failed"
+	elif reasons.size() > 0:
+		status = "suspicious"
+	var room_span := _preferred_span(room_opening_report)
+	var corridor_span := _preferred_span(corridor_opening_report)
+	return {
+		"join_id": str("corridor_", corridor_id, "_", end_key),
+		"status": status,
+		"reasons": reasons,
+		"corridor_id": corridor_id,
+		"end_key": end_key,
+		"connected_room_id": room_id,
+		"anchor_point": anchor,
+		"intended_opening_width": intended_room_width,
+		"inferred_room_edge": best_match,
+		"accepted_room_edge_indices": room_opening_report.get("accepted_edge_indices", []).duplicate(true),
+		"accepted_corridor_edge_indices": corridor_opening_report.get("accepted_edge_indices", []).duplicate(true),
+		"room_opening_registered": room_opening_registered,
+		"room_opening_carveable": room_carveable,
+		"room_opening_report": room_opening_report,
+		"corridor_end_marked": corridor_end_marked,
+		"corridor_end_carveable": corridor_carveable,
+		"corridor_opening_report": corridor_opening_report,
+		"room_opening_span": room_span,
+		"corridor_opening_span": corridor_span,
+		"corridor_center": corridor["center"],
+		"corridor_start_anchor": corridor["start_anchor"],
+		"corridor_end_anchor": corridor["end_anchor"],
+		"corridor_start_y": float(corridor["start_y"]),
+		"corridor_end_y": float(corridor["end_y"]),
+		"corridor_width": float(corridor["width"])
+	}
+
+func _find_opening_report(openings: Array, corridor_id: int, end_key: String, opening_kind: String) -> Dictionary:
+	for opening_variant in openings:
+		var opening_report: Dictionary = opening_variant
+		if int(opening_report.get("source_corridor_id", -1)) != corridor_id:
+			continue
+		if str(opening_report.get("source_end", "")) != end_key:
+			continue
+		if str(opening_report.get("opening_kind", "")) != opening_kind:
+			continue
+		return opening_report
+	return {}
+
+func _preferred_span(opening_report: Dictionary) -> Dictionary:
+	if opening_report.is_empty():
+		return {}
+	var accepted_matches: Array = opening_report.get("accepted_matches", [])
+	if not accepted_matches.is_empty():
+		return accepted_matches[0]
+	return opening_report.get("best_match", {})
 
 func _ray_to_polygon(origin: Vector2, direction: Vector2, polygon: PackedVector2Array) -> Vector2:
 	var best := origin
