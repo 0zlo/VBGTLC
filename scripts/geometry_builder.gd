@@ -110,8 +110,9 @@ static func inspect_wall_openings(polygon: PackedVector2Array, wall_openings: Ar
 		})
 	for opening_index in wall_openings.size():
 		var opening_data: Dictionary = wall_openings[opening_index]
-		var best_match: Dictionary = {}
+		var nearest_match: Dictionary = {}
 		var accepted_matches: Array = []
+		var all_matches: Array = []
 		for edge_index in edge_reports.size():
 			var edge_report: Dictionary = edge_reports[edge_index]
 			var match_report: Dictionary = _inspect_opening_on_edge(
@@ -120,20 +121,58 @@ static func inspect_wall_openings(polygon: PackedVector2Array, wall_openings: Ar
 				opening_data,
 				int(edge_report.get("edge_index", edge_index))
 			)
-			if best_match.is_empty() or float(match_report.get("distance", INF)) < float(best_match.get("distance", INF)):
-				best_match = match_report
-			if bool(match_report.get("accepted", false)):
-				accepted_matches.append(match_report)
-				var edge_matches: Array = edge_report.get("accepted_matches", [])
-				edge_matches.append(match_report)
-				edge_report["accepted_matches"] = edge_matches
-				edge_reports[edge_index] = edge_report
+			all_matches.append(match_report)
+			if nearest_match.is_empty() or float(match_report.get("distance", INF)) < float(nearest_match.get("distance", INF)):
+				nearest_match = match_report
+
+		var target_edge_index := int(opening_data.get("target_edge_index", -1))
+		var target_edge_valid := _is_valid_edge_index(target_edge_index, edge_reports)
+		var resolved_match: Dictionary = {}
+		var edge_source := "inferred"
+		var used_authoritative_edge := false
+		if target_edge_valid:
+			var authoritative_match: Dictionary = all_matches[target_edge_index].duplicate(true)
+			authoritative_match["accepted"] = float(authoritative_match.get("edge_length", 0.0)) > 0.05
+			authoritative_match["match_mode"] = "authoritative"
+			resolved_match = authoritative_match
+			edge_source = "authoritative"
+			used_authoritative_edge = true
+			if bool(authoritative_match.get("accepted", false)):
+				accepted_matches.append(authoritative_match)
+				var authoritative_edge_report: Dictionary = edge_reports[target_edge_index]
+				var authoritative_edge_matches: Array = authoritative_edge_report.get("accepted_matches", [])
+				authoritative_edge_matches.append(authoritative_match)
+				authoritative_edge_report["accepted_matches"] = authoritative_edge_matches
+				edge_reports[target_edge_index] = authoritative_edge_report
+		else:
+			for edge_index in edge_reports.size():
+				var inferred_match: Dictionary = all_matches[edge_index]
+				if bool(inferred_match.get("accepted", false)):
+					accepted_matches.append(inferred_match)
+					var inferred_edge_report: Dictionary = edge_reports[edge_index]
+					var inferred_edge_matches: Array = inferred_edge_report.get("accepted_matches", [])
+					inferred_edge_matches.append(inferred_match)
+					inferred_edge_report["accepted_matches"] = inferred_edge_matches
+					edge_reports[edge_index] = inferred_edge_report
+			if not accepted_matches.is_empty():
+				resolved_match = accepted_matches[0]
+			else:
+				resolved_match = nearest_match
+
+		var used_edge_index := int(resolved_match.get("edge_index", -1))
 		var opening_report: Dictionary = opening_data.duplicate(true)
 		opening_report["opening_index"] = opening_index
-		opening_report["best_match"] = best_match
+		opening_report["best_match"] = resolved_match
+		opening_report["resolved_match"] = resolved_match
+		opening_report["nearest_match"] = nearest_match
 		opening_report["accepted_matches"] = accepted_matches
 		opening_report["accepted"] = accepted_matches.size() > 0
 		opening_report["accepted_edge_indices"] = _collect_match_edge_indices(accepted_matches)
+		opening_report["target_edge_index"] = target_edge_index
+		opening_report["target_edge_valid"] = target_edge_valid
+		opening_report["used_edge_index"] = used_edge_index
+		opening_report["used_authoritative_edge"] = used_authoritative_edge and used_edge_index == target_edge_index
+		opening_report["edge_source"] = edge_source
 		opening_reports.append(opening_report)
 	return {
 		"polygon": normalized_polygon,
@@ -261,6 +300,9 @@ static func _collect_match_edge_indices(match_reports: Array) -> Array:
 		if edge_index >= 0 and not indices.has(edge_index):
 			indices.append(edge_index)
 	return indices
+
+static func _is_valid_edge_index(edge_index: int, edge_reports: Array) -> bool:
+	return edge_index >= 0 and edge_index < edge_reports.size()
 
 static func _add_triangle(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3) -> void:
 	var normal := (b - a).cross(c - a).normalized()

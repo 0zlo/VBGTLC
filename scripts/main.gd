@@ -864,10 +864,13 @@ func _build_join_debug_text(debug_data: Dictionary) -> String:
 			]
 		)
 		lines.append(
-			"corridor %s -> wall %s (offset %.2f) | room %s/%s | corridor %s/%s | %s" % [
+			"corridor %s -> wall %s (offset %.2f) | edge auth %s -> used %s [%s] | room %s/%s | corridor %s/%s | %s" % [
 				_format_vector2(join.get("corridor_anchor_point", join.get("anchor_point", Vector2.ZERO))),
 				_format_vector2(join.get("room_wall_point", join.get("anchor_point", Vector2.ZERO))),
 				float(join.get("anchor_offset", 0.0)),
+				_format_edge_index(join.get("authoritative_room_edge_index", -1)),
+				_format_edge_index(join.get("room_edge_used_index", -1)),
+				"same" if bool(join.get("room_edge_matches_authoritative", false)) else str(join.get("room_opening_edge_source", "none")),
 				"registered" if bool(join.get("room_opening_registered", false)) else "missing",
 				"carveable" if bool(join.get("room_opening_carveable", false)) else "blocked",
 				"marked" if bool(join.get("corridor_end_marked", false)) else "missing",
@@ -909,7 +912,7 @@ func _format_join_log_line(join: Dictionary) -> String:
 	var edge_distance := float(inferred_edge.get("distance", -1.0))
 	var corner_clearance := float(inferred_edge.get("corner_clearance", -1.0))
 	return (
-		"[JoinDebug] %s corridor=%d end=%s room=%d corridor_anchor=%s wall_point=%s offset=%.2f room_registered=%s room_carveable=%s corridor_marked=%s corridor_carveable=%s edge=%s wall_len=%.2f dist=%.2f corner=%.2f reasons=%s"
+		"[JoinDebug] %s corridor=%d end=%s room=%d corridor_anchor=%s wall_point=%s offset=%.2f auth_edge=%s used_edge=%s same_edge=%s room_registered=%s room_carveable=%s corridor_marked=%s corridor_carveable=%s wall_len=%.2f dist=%.2f corner=%.2f reasons=%s"
 		% [
 			str(join.get("status", "ok")).to_upper(),
 			int(join.get("corridor_id", -1)),
@@ -918,11 +921,13 @@ func _format_join_log_line(join: Dictionary) -> String:
 			_format_vector2(join.get("corridor_anchor_point", join.get("anchor_point", Vector2.ZERO))),
 			_format_vector2(join.get("room_wall_point", join.get("anchor_point", Vector2.ZERO))),
 			float(join.get("anchor_offset", 0.0)),
+			_format_edge_index(join.get("authoritative_room_edge_index", -1)),
+			_format_edge_index(join.get("room_edge_used_index", -1)),
+			str(bool(join.get("room_edge_matches_authoritative", false))),
 			str(bool(join.get("room_opening_registered", false))),
 			str(bool(join.get("room_opening_carveable", false))),
 			str(bool(join.get("corridor_end_marked", false))),
 			str(bool(join.get("corridor_end_carveable", false))),
-			"?" if edge_index < 0 else str(edge_index),
 			edge_length,
 			edge_distance,
 			corner_clearance,
@@ -936,13 +941,14 @@ func _format_reason_line(reasons: Array) -> String:
 	return "reasons: %s" % _join_strings(reasons, ", ")
 
 func _join_edge_summary(join: Dictionary) -> String:
-	var inferred_edge: Dictionary = join.get("inferred_room_edge", {})
-	if inferred_edge.is_empty():
-		return "edge ?"
-	return "edge %s | wall %.2f | dist %.2f" % [
-		str(inferred_edge.get("edge_index", "?")),
-		float(inferred_edge.get("edge_length", 0.0)),
-		float(inferred_edge.get("distance", 0.0))
+	var used_edge: Dictionary = join.get("inferred_room_edge", {})
+	if used_edge.is_empty():
+		return "edge auth %s -> used ?" % _format_edge_index(join.get("authoritative_room_edge_index", -1))
+	return "edge auth %s -> used %s | wall %.2f | dist %.2f" % [
+		_format_edge_index(join.get("authoritative_room_edge_index", -1)),
+		_format_edge_index(join.get("room_edge_used_index", -1)),
+		float(used_edge.get("edge_length", 0.0)),
+		float(used_edge.get("distance", 0.0))
 	]
 
 func _join_status_color_bbcode(status: String) -> String:
@@ -957,6 +963,10 @@ func _join_status_color_bbcode(status: String) -> String:
 func _format_vector2(value: Variant) -> String:
 	var point: Vector2 = value if value is Vector2 else Vector2.ZERO
 	return "(%.2f, %.2f)" % [point.x, point.y]
+
+func _format_edge_index(value: Variant) -> String:
+	var edge_index := int(value)
+	return "?" if edge_index < 0 else str(edge_index)
 
 func _join_strings(values: Array, separator: String) -> String:
 	var parts: String = ""

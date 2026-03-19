@@ -10,8 +10,10 @@ const STATUS_COLORS := {
 }
 const ROOM_SPAN_COLOR := Color(0.33, 0.9, 1.0, 0.95)
 const CORRIDOR_SPAN_COLOR := Color(0.62, 1.0, 0.53, 0.95)
-const EDGE_COLOR := Color(0.76, 0.49, 1.0, 0.95)
-const BEST_GUESS_EDGE_COLOR := Color(0.96, 0.6, 1.0, 0.8)
+const AUTHORITATIVE_EDGE_COLOR := Color(0.76, 0.49, 1.0, 0.95)
+const USED_EDGE_MATCH_COLOR := Color(0.44, 1.0, 0.56, 0.92)
+const USED_EDGE_MISMATCH_COLOR := Color(1.0, 0.55, 0.28, 0.95)
+const BEST_GUESS_EDGE_COLOR := Color(0.96, 0.6, 1.0, 0.45)
 const PROJECTION_COLOR := Color(1.0, 0.96, 0.55, 0.78)
 const ROOM_WALL_POINT_COLOR := Color(0.64, 0.94, 1.0, 1.0)
 const ANCHOR_MARKER_SIZE := 0.38
@@ -102,16 +104,18 @@ func _draw_join_gizmos(line_mesh: ImmediateMesh, debug_data: Dictionary) -> void
 		if status != "ok":
 			_add_line(line_mesh, corridor_anchor, corridor_anchor + Vector3.UP * 1.7, status_color)
 
-		var room_opening_report: Dictionary = join.get("room_opening_report", {})
-		var accepted_room_matches: Array = room_opening_report.get("accepted_matches", [])
-		if accepted_room_matches.is_empty():
-			var inferred_edge: Dictionary = join.get("inferred_room_edge", {})
-			if not inferred_edge.is_empty():
-				_draw_match_edge(line_mesh, room, inferred_edge, BEST_GUESS_EDGE_COLOR, 0.14)
-		else:
-			for match_variant in accepted_room_matches:
-				var match_report: Dictionary = match_variant
-				_draw_match_edge(line_mesh, room, match_report, EDGE_COLOR, 0.14)
+		var authoritative_room_edge: Dictionary = join.get("authoritative_room_edge", {})
+		if not authoritative_room_edge.is_empty():
+			_draw_match_edge(line_mesh, room, authoritative_room_edge, AUTHORITATIVE_EDGE_COLOR, 0.14)
+
+		var used_room_edge: Dictionary = join.get("room_edge_used", {})
+		if not used_room_edge.is_empty():
+			var used_edge_color := USED_EDGE_MATCH_COLOR if bool(join.get("room_edge_matches_authoritative", false)) else USED_EDGE_MISMATCH_COLOR
+			_draw_match_edge(line_mesh, room, used_room_edge, used_edge_color, 0.22)
+
+		var nearest_room_edge: Dictionary = join.get("nearest_room_edge", {})
+		if not nearest_room_edge.is_empty() and int(nearest_room_edge.get("edge_index", -1)) != int(join.get("authoritative_room_edge_index", -1)):
+			_draw_match_edge(line_mesh, room, nearest_room_edge, BEST_GUESS_EDGE_COLOR, 0.08)
 
 		var room_span: Dictionary = join.get("room_opening_span", {})
 		if not room_span.is_empty():
@@ -121,9 +125,9 @@ func _draw_join_gizmos(line_mesh: ImmediateMesh, debug_data: Dictionary) -> void
 		if not corridor_span.is_empty():
 			_draw_match_span(line_mesh, corridor, corridor_span, CORRIDOR_SPAN_COLOR, 0.36)
 
-		var inferred_edge: Dictionary = join.get("inferred_room_edge", {})
-		if not inferred_edge.is_empty():
-			var nearest_point: Vector2 = inferred_edge.get("nearest_point", room_wall_point)
+		var used_edge_match: Dictionary = join.get("inferred_room_edge", {})
+		if not used_edge_match.is_empty():
+			var nearest_point: Vector2 = used_edge_match.get("nearest_point", room_wall_point)
 			var projection_start := Vector3(room_wall_point.x, room_wall_height + 0.3, room_wall_point.y)
 			var projection_end := Vector3(nearest_point.x, _area_height(room, nearest_point) + 0.3, nearest_point.y)
 			if projection_start.distance_to(projection_end) > 0.06:

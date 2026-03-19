@@ -252,8 +252,12 @@ func _find_room(rooms: Array, room_id: int) -> Dictionary:
 
 func _make_corridor(rng: RandomNumberGenerator, corridor_id: int, room_a: Dictionary, room_b: Dictionary) -> Dictionary:
 	var direction: Vector2 = (room_b["center"] - room_a["center"]).normalized()
-	var start_wall_point := _ray_to_polygon(room_a["center"], direction, room_a["polygon"])
-	var end_wall_point := _ray_to_polygon(room_b["center"], -direction, room_b["polygon"])
+	var start_hit: Dictionary = _ray_to_polygon_hit(room_a["center"], direction, room_a["polygon"])
+	var end_hit: Dictionary = _ray_to_polygon_hit(room_b["center"], -direction, room_b["polygon"])
+	var start_wall_point: Vector2 = start_hit.get("point", room_a["center"])
+	var end_wall_point: Vector2 = end_hit.get("point", room_b["center"])
+	var start_host_edge_index := int(start_hit.get("edge_index", -1))
+	var end_host_edge_index := int(end_hit.get("edge_index", -1))
 	var width: float = rng.randf_range(2.6, 3.6)
 	var inset: float = min(width * 0.28, 0.6)
 	var start_point := start_wall_point - direction * inset
@@ -289,6 +293,8 @@ func _make_corridor(rng: RandomNumberGenerator, corridor_id: int, room_a: Dictio
 		"end_anchor": end_point,
 		"start_wall_point": start_wall_point,
 		"end_wall_point": end_wall_point,
+		"start_host_edge_index": start_host_edge_index,
+		"end_host_edge_index": end_host_edge_index,
 		"wall_openings": [
 			{
 				"point": start_point,
@@ -499,7 +505,8 @@ func _register_room_openings(rooms: Array, corridors: Array) -> void:
 			corridor.get("start_wall_point", corridor["start_anchor"]),
 			float(corridor["width"]) + 0.9,
 			int(corridor["room_b"]),
-			corridor.get("start_anchor", corridor.get("start_wall_point", Vector2.ZERO))
+			corridor.get("start_anchor", corridor.get("start_wall_point", Vector2.ZERO)),
+			int(corridor.get("start_host_edge_index", -1))
 		)
 		_append_room_opening(
 			rooms,
@@ -509,10 +516,11 @@ func _register_room_openings(rooms: Array, corridors: Array) -> void:
 			corridor.get("end_wall_point", corridor["end_anchor"]),
 			float(corridor["width"]) + 0.9,
 			int(corridor["room_a"]),
-			corridor.get("end_anchor", corridor.get("end_wall_point", Vector2.ZERO))
+			corridor.get("end_anchor", corridor.get("end_wall_point", Vector2.ZERO)),
+			int(corridor.get("end_host_edge_index", -1))
 		)
 
-func _append_room_opening(rooms: Array, room_id: int, corridor_id: int, end_key: String, point: Vector2, width: float, connected_room_id: int, corridor_anchor_point: Vector2) -> void:
+func _append_room_opening(rooms: Array, room_id: int, corridor_id: int, end_key: String, point: Vector2, width: float, connected_room_id: int, corridor_anchor_point: Vector2, target_edge_index: int) -> void:
 	var room := _find_room(rooms, room_id)
 	if room.is_empty():
 		return
@@ -527,7 +535,8 @@ func _append_room_opening(rooms: Array, room_id: int, corridor_id: int, end_key:
 		"host_room_id": room_id,
 		"connected_room_id": connected_room_id,
 		"room_wall_point": point,
-		"corridor_anchor_point": corridor_anchor_point
+		"corridor_anchor_point": corridor_anchor_point,
+		"target_edge_index": target_edge_index
 	})
 
 func _build_join_debug(seed_value: int, rooms: Array, corridors: Array) -> Dictionary:
@@ -604,17 +613,25 @@ func _build_join_report(corridor: Dictionary, end_key: String, room_analysis_by_
 	var room_id := int(corridor["room_a"] if is_start else corridor["room_b"])
 	var corridor_anchor: Vector2 = corridor["start_anchor"] if is_start else corridor["end_anchor"]
 	var room_wall_point: Vector2 = corridor.get("start_wall_point", corridor_anchor) if is_start else corridor.get("end_wall_point", corridor_anchor)
+	var authoritative_room_edge_index := int(corridor.get("start_host_edge_index", -1)) if is_start else int(corridor.get("end_host_edge_index", -1))
 	var intended_room_width := float(corridor["width"]) + 0.9
 	var corridor_analysis: Dictionary = corridor_analysis_by_id.get(corridor_id, {})
 	var room_analysis: Dictionary = room_analysis_by_id.get(room_id, {})
 	var room_opening_report := _find_opening_report(room_analysis.get("openings", []), corridor_id, end_key, "room_join")
 	var corridor_opening_report := _find_opening_report(corridor_analysis.get("openings", []), corridor_id, end_key, "corridor_end")
 	var best_match: Dictionary = room_opening_report.get("best_match", {})
+	var authoritative_room_edge: Dictionary = _find_edge_report(room_analysis, authoritative_room_edge_index)
+	var used_room_edge_index := int(room_opening_report.get("used_edge_index", -1))
+	var used_room_edge: Dictionary = _find_edge_report(room_analysis, used_room_edge_index)
+	var nearest_room_edge: Dictionary = room_opening_report.get("nearest_match", {})
+	var room_edge_matches_authoritative := authoritative_room_edge_index >= 0 and used_room_edge_index == authoritative_room_edge_index and bool(room_opening_report.get("used_authoritative_edge", false))
 	var reasons: Array = []
 	var room_opening_registered := not room_opening_report.is_empty()
 	var corridor_end_marked := not corridor_opening_report.is_empty()
 	var room_carveable := bool(room_opening_report.get("accepted", false))
 	var corridor_carveable := bool(corridor_opening_report.get("accepted", false))
+	if authoritative_room_edge_index < 0:
+		reasons.append("no authoritative room edge")
 	if not room_opening_registered:
 		reasons.append("no opening registered on room side")
 	if not corridor_end_marked:
@@ -623,17 +640,15 @@ func _build_join_report(corridor: Dictionary, end_key: String, room_analysis_by_
 		reasons.append("no opening registered on either side")
 	elif not room_carveable or not corridor_carveable:
 		reasons.append("no opening registered on one side")
+	if room_opening_registered and authoritative_room_edge_index >= 0 and used_room_edge_index != authoritative_room_edge_index:
+		reasons.append("authoritative room edge not used")
 	if not best_match.is_empty():
 		if float(best_match.get("corner_clearance", 999.0)) < max(0.45, intended_room_width * 0.35):
 			reasons.append("opening too close to a room corner")
-		if float(best_match.get("distance", 999.0)) > 0.55 or int(room_opening_report.get("accepted_edge_indices", []).size()) != 1:
-			reasons.append("opening mapped to an implausible wall edge")
 		if intended_room_width > float(best_match.get("edge_length", 0.0)) * 0.9:
 			reasons.append("corridor width too large for the host wall segment")
-	else:
-		reasons.append("no inferred room edge")
 	var status := "ok"
-	if reasons.has("no opening registered on either side") or reasons.has("no inferred room edge"):
+	if reasons.has("no opening registered on either side") or reasons.has("no authoritative room edge"):
 		status = "failed"
 	elif reasons.size() > 0:
 		status = "suspicious"
@@ -651,6 +666,13 @@ func _build_join_report(corridor: Dictionary, end_key: String, room_analysis_by_
 		"room_wall_point": room_wall_point,
 		"anchor_offset": corridor_anchor.distance_to(room_wall_point),
 		"intended_opening_width": intended_room_width,
+		"authoritative_room_edge_index": authoritative_room_edge_index,
+		"authoritative_room_edge": authoritative_room_edge,
+		"room_edge_used_index": used_room_edge_index,
+		"room_edge_used": used_room_edge,
+		"room_edge_matches_authoritative": room_edge_matches_authoritative,
+		"room_opening_edge_source": str(room_opening_report.get("edge_source", "none")),
+		"nearest_room_edge": nearest_room_edge,
 		"inferred_room_edge": best_match,
 		"accepted_room_edge_indices": room_opening_report.get("accepted_edge_indices", []).duplicate(true),
 		"accepted_corridor_edge_indices": corridor_opening_report.get("accepted_edge_indices", []).duplicate(true),
@@ -690,9 +712,24 @@ func _preferred_span(opening_report: Dictionary) -> Dictionary:
 		return accepted_matches[0]
 	return opening_report.get("best_match", {})
 
+func _find_edge_report(analysis: Dictionary, edge_index: int) -> Dictionary:
+	if edge_index < 0:
+		return {}
+	for edge_variant in analysis.get("edges", []):
+		var edge_report: Dictionary = edge_variant
+		if int(edge_report.get("edge_index", -1)) == edge_index:
+			return edge_report
+	return {}
+
 func _ray_to_polygon(origin: Vector2, direction: Vector2, polygon: PackedVector2Array) -> Vector2:
+	return _ray_to_polygon_hit(origin, direction, polygon).get("point", origin)
+
+func _ray_to_polygon_hit(origin: Vector2, direction: Vector2, polygon: PackedVector2Array) -> Dictionary:
 	var best := origin
 	var best_t := INF
+	var best_edge_index := -1
+	var best_edge_from := origin
+	var best_edge_to := origin
 	var ray_end := origin + direction.normalized() * 200.0
 	for index in polygon.size():
 		var a: Vector2 = polygon[index]
@@ -704,7 +741,16 @@ func _ray_to_polygon(origin: Vector2, direction: Vector2, polygon: PackedVector2
 		if t < best_t:
 			best_t = t
 			best = hit
-	return best
+			best_edge_index = index
+			best_edge_from = a
+			best_edge_to = b
+	return {
+		"point": best,
+		"edge_index": best_edge_index,
+		"edge_from": best_edge_from,
+		"edge_to": best_edge_to,
+		"distance": best_t
+	}
 
 func _connection_key(a: int, b: int) -> String:
 	return str(min(a, b), ":", max(a, b))
