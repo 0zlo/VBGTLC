@@ -13,6 +13,7 @@ const CORRIDOR_SPAN_COLOR := Color(0.62, 1.0, 0.53, 0.95)
 const EDGE_COLOR := Color(0.76, 0.49, 1.0, 0.95)
 const BEST_GUESS_EDGE_COLOR := Color(0.96, 0.6, 1.0, 0.8)
 const PROJECTION_COLOR := Color(1.0, 0.96, 0.55, 0.78)
+const ROOM_WALL_POINT_COLOR := Color(0.64, 0.94, 1.0, 1.0)
 const ANCHOR_MARKER_SIZE := 0.38
 
 var layout: Dictionary = {}
@@ -87,13 +88,19 @@ func _draw_join_gizmos(line_mesh: ImmediateMesh, debug_data: Dictionary) -> void
 		var corridor: Dictionary = corridors_by_id.get(int(join.get("corridor_id", -1)), {})
 		var status := str(join.get("status", "ok"))
 		var status_color: Color = STATUS_COLORS.get(status, STATUS_COLORS["ok"])
-		var anchor_point: Vector2 = join.get("anchor_point", Vector2.ZERO)
-		var anchor_height := _anchor_height(join, room, corridor)
-		var anchor := Vector3(anchor_point.x, anchor_height + 0.2, anchor_point.y)
-		_draw_cross(line_mesh, anchor, ANCHOR_MARKER_SIZE, status_color)
+		var corridor_anchor_point: Vector2 = join.get("corridor_anchor_point", join.get("anchor_point", Vector2.ZERO))
+		var room_wall_point: Vector2 = join.get("room_wall_point", corridor_anchor_point)
+		var corridor_anchor_height := _anchor_height(corridor_anchor_point, corridor)
+		var room_wall_height := _anchor_height(room_wall_point, room)
+		var corridor_anchor := Vector3(corridor_anchor_point.x, corridor_anchor_height + 0.2, corridor_anchor_point.y)
+		var room_anchor := Vector3(room_wall_point.x, room_wall_height + 0.26, room_wall_point.y)
+		_draw_cross(line_mesh, corridor_anchor, ANCHOR_MARKER_SIZE, status_color)
+		_draw_cross(line_mesh, room_anchor, ANCHOR_MARKER_SIZE * 0.62, ROOM_WALL_POINT_COLOR)
+		if corridor_anchor.distance_to(room_anchor) > 0.04:
+			_add_line(line_mesh, corridor_anchor, room_anchor, ROOM_WALL_POINT_COLOR)
 
 		if status != "ok":
-			_add_line(line_mesh, anchor, anchor + Vector3.UP * 1.7, status_color)
+			_add_line(line_mesh, corridor_anchor, corridor_anchor + Vector3.UP * 1.7, status_color)
 
 		var room_opening_report: Dictionary = join.get("room_opening_report", {})
 		var accepted_room_matches: Array = room_opening_report.get("accepted_matches", [])
@@ -116,8 +123,8 @@ func _draw_join_gizmos(line_mesh: ImmediateMesh, debug_data: Dictionary) -> void
 
 		var inferred_edge: Dictionary = join.get("inferred_room_edge", {})
 		if not inferred_edge.is_empty():
-			var nearest_point: Vector2 = inferred_edge.get("nearest_point", anchor_point)
-			var projection_start := Vector3(anchor_point.x, anchor_height + 0.3, anchor_point.y)
+			var nearest_point: Vector2 = inferred_edge.get("nearest_point", room_wall_point)
+			var projection_start := Vector3(room_wall_point.x, room_wall_height + 0.3, room_wall_point.y)
 			var projection_end := Vector3(nearest_point.x, _area_height(room, nearest_point) + 0.3, nearest_point.y)
 			if projection_start.distance_to(projection_end) > 0.06:
 				_add_line(line_mesh, projection_start, projection_end, PROJECTION_COLOR)
@@ -140,11 +147,8 @@ func _draw_match_span(line_mesh: ImmediateMesh, area: Dictionary, match_report: 
 	var to_point := Vector3(span_to.x, _area_height(area, span_to) + y_offset, span_to.y)
 	_add_line(line_mesh, from_point, to_point, color)
 
-func _anchor_height(join: Dictionary, room: Dictionary, corridor: Dictionary) -> float:
-	var anchor: Vector2 = join.get("anchor_point", Vector2.ZERO)
-	if room.is_empty():
-		return _area_height(corridor, anchor)
-	return _area_height(room, anchor)
+func _anchor_height(anchor: Vector2, area: Dictionary) -> float:
+	return _area_height(area, anchor)
 
 func _area_height(area: Dictionary, point: Vector2) -> float:
 	if area.is_empty():

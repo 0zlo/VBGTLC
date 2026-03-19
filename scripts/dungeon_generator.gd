@@ -252,12 +252,12 @@ func _find_room(rooms: Array, room_id: int) -> Dictionary:
 
 func _make_corridor(rng: RandomNumberGenerator, corridor_id: int, room_a: Dictionary, room_b: Dictionary) -> Dictionary:
 	var direction: Vector2 = (room_b["center"] - room_a["center"]).normalized()
-	var start_point := _ray_to_polygon(room_a["center"], direction, room_a["polygon"])
-	var end_point := _ray_to_polygon(room_b["center"], -direction, room_b["polygon"])
+	var start_wall_point := _ray_to_polygon(room_a["center"], direction, room_a["polygon"])
+	var end_wall_point := _ray_to_polygon(room_b["center"], -direction, room_b["polygon"])
 	var width: float = rng.randf_range(2.6, 3.6)
 	var inset: float = min(width * 0.28, 0.6)
-	start_point -= direction * inset
-	end_point += direction * inset
+	var start_point := start_wall_point - direction * inset
+	var end_point := end_wall_point + direction * inset
 	var perp := Vector2(-direction.y, direction.x) * width * 0.5
 	var polygon := PackedVector2Array([
 		start_point + perp,
@@ -284,8 +284,11 @@ func _make_corridor(rng: RandomNumberGenerator, corridor_id: int, room_a: Dictio
 		"theme_id": room_b["theme_id"],
 		"brightness": rng.randf_range(0.86, 0.98),
 		"width": width,
+		"wall_inset": inset,
 		"start_anchor": start_point,
 		"end_anchor": end_point,
+		"start_wall_point": start_wall_point,
+		"end_wall_point": end_wall_point,
 		"wall_openings": [
 			{
 				"point": start_point,
@@ -294,7 +297,9 @@ func _make_corridor(rng: RandomNumberGenerator, corridor_id: int, room_a: Dictio
 				"source_corridor_id": corridor_id,
 				"source_end": "start",
 				"connected_room_id": int(room_a["id"]),
-				"host_corridor_id": corridor_id
+				"host_corridor_id": corridor_id,
+				"corridor_anchor_point": start_point,
+				"room_wall_point": start_wall_point
 			},
 			{
 				"point": end_point,
@@ -303,7 +308,9 @@ func _make_corridor(rng: RandomNumberGenerator, corridor_id: int, room_a: Dictio
 				"source_corridor_id": corridor_id,
 				"source_end": "end",
 				"connected_room_id": int(room_b["id"]),
-				"host_corridor_id": corridor_id
+				"host_corridor_id": corridor_id,
+				"corridor_anchor_point": end_point,
+				"room_wall_point": end_wall_point
 			}
 		]
 	}
@@ -489,21 +496,23 @@ func _register_room_openings(rooms: Array, corridors: Array) -> void:
 			int(corridor["room_a"]),
 			int(corridor["id"]),
 			"start",
-			corridor["start_anchor"],
+			corridor.get("start_wall_point", corridor["start_anchor"]),
 			float(corridor["width"]) + 0.9,
-			int(corridor["room_b"])
+			int(corridor["room_b"]),
+			corridor.get("start_anchor", corridor.get("start_wall_point", Vector2.ZERO))
 		)
 		_append_room_opening(
 			rooms,
 			int(corridor["room_b"]),
 			int(corridor["id"]),
 			"end",
-			corridor["end_anchor"],
+			corridor.get("end_wall_point", corridor["end_anchor"]),
 			float(corridor["width"]) + 0.9,
-			int(corridor["room_a"])
+			int(corridor["room_a"]),
+			corridor.get("end_anchor", corridor.get("end_wall_point", Vector2.ZERO))
 		)
 
-func _append_room_opening(rooms: Array, room_id: int, corridor_id: int, end_key: String, point: Vector2, width: float, connected_room_id: int) -> void:
+func _append_room_opening(rooms: Array, room_id: int, corridor_id: int, end_key: String, point: Vector2, width: float, connected_room_id: int, corridor_anchor_point: Vector2) -> void:
 	var room := _find_room(rooms, room_id)
 	if room.is_empty():
 		return
@@ -516,7 +525,9 @@ func _append_room_opening(rooms: Array, room_id: int, corridor_id: int, end_key:
 		"source_corridor_id": corridor_id,
 		"source_end": end_key,
 		"host_room_id": room_id,
-		"connected_room_id": connected_room_id
+		"connected_room_id": connected_room_id,
+		"room_wall_point": point,
+		"corridor_anchor_point": corridor_anchor_point
 	})
 
 func _build_join_debug(seed_value: int, rooms: Array, corridors: Array) -> Dictionary:
@@ -591,7 +602,8 @@ func _build_join_report(corridor: Dictionary, end_key: String, room_analysis_by_
 	var is_start := end_key == "start"
 	var corridor_id := int(corridor["id"])
 	var room_id := int(corridor["room_a"] if is_start else corridor["room_b"])
-	var anchor: Vector2 = corridor["start_anchor"] if is_start else corridor["end_anchor"]
+	var corridor_anchor: Vector2 = corridor["start_anchor"] if is_start else corridor["end_anchor"]
+	var room_wall_point: Vector2 = corridor.get("start_wall_point", corridor_anchor) if is_start else corridor.get("end_wall_point", corridor_anchor)
 	var intended_room_width := float(corridor["width"]) + 0.9
 	var corridor_analysis: Dictionary = corridor_analysis_by_id.get(corridor_id, {})
 	var room_analysis: Dictionary = room_analysis_by_id.get(room_id, {})
@@ -634,7 +646,10 @@ func _build_join_report(corridor: Dictionary, end_key: String, room_analysis_by_
 		"corridor_id": corridor_id,
 		"end_key": end_key,
 		"connected_room_id": room_id,
-		"anchor_point": anchor,
+		"anchor_point": corridor_anchor,
+		"corridor_anchor_point": corridor_anchor,
+		"room_wall_point": room_wall_point,
+		"anchor_offset": corridor_anchor.distance_to(room_wall_point),
 		"intended_opening_width": intended_room_width,
 		"inferred_room_edge": best_match,
 		"accepted_room_edge_indices": room_opening_report.get("accepted_edge_indices", []).duplicate(true),

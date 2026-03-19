@@ -864,8 +864,10 @@ func _build_join_debug_text(debug_data: Dictionary) -> String:
 			]
 		)
 		lines.append(
-			"anchor %s | room %s/%s | corridor %s/%s | %s" % [
-				_format_vector2(join.get("anchor_point", Vector2.ZERO)),
+			"corridor %s -> wall %s (offset %.2f) | room %s/%s | corridor %s/%s | %s" % [
+				_format_vector2(join.get("corridor_anchor_point", join.get("anchor_point", Vector2.ZERO))),
+				_format_vector2(join.get("room_wall_point", join.get("anchor_point", Vector2.ZERO))),
+				float(join.get("anchor_offset", 0.0)),
 				"registered" if bool(join.get("room_opening_registered", false)) else "missing",
 				"carveable" if bool(join.get("room_opening_carveable", false)) else "blocked",
 				"marked" if bool(join.get("corridor_end_marked", false)) else "missing",
@@ -907,13 +909,15 @@ func _format_join_log_line(join: Dictionary) -> String:
 	var edge_distance := float(inferred_edge.get("distance", -1.0))
 	var corner_clearance := float(inferred_edge.get("corner_clearance", -1.0))
 	return (
-		"[JoinDebug] %s corridor=%d end=%s room=%d anchor=%s room_registered=%s room_carveable=%s corridor_marked=%s corridor_carveable=%s edge=%s wall_len=%.2f dist=%.2f corner=%.2f reasons=%s"
+		"[JoinDebug] %s corridor=%d end=%s room=%d corridor_anchor=%s wall_point=%s offset=%.2f room_registered=%s room_carveable=%s corridor_marked=%s corridor_carveable=%s edge=%s wall_len=%.2f dist=%.2f corner=%.2f reasons=%s"
 		% [
 			str(join.get("status", "ok")).to_upper(),
 			int(join.get("corridor_id", -1)),
 			str(join.get("end_key", "end")),
 			int(join.get("connected_room_id", -1)),
-			_format_vector2(join.get("anchor_point", Vector2.ZERO)),
+			_format_vector2(join.get("corridor_anchor_point", join.get("anchor_point", Vector2.ZERO))),
+			_format_vector2(join.get("room_wall_point", join.get("anchor_point", Vector2.ZERO))),
+			float(join.get("anchor_offset", 0.0)),
 			str(bool(join.get("room_opening_registered", false))),
 			str(bool(join.get("room_opening_carveable", false))),
 			str(bool(join.get("corridor_end_marked", false))),
