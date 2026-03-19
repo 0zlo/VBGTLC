@@ -61,7 +61,8 @@ Vault of Bent Geometry That Loads Correctly (VBGTLC) is a Godot 4 vertical slice
 - `Right Mouse`: continuity pulse
 - `Q`: use tonic
 - `F`: use aether charge
-- `Tab`: expand/collapse map
+- `Tab`: toggle minimap
+- `F10`: toggle godmode
 - `Esc`: pause
 
 ## Sample Seeds

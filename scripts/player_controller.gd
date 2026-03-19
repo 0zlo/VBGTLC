@@ -24,6 +24,7 @@ var mana := 60.0
 var tonics := 1
 var aether := 1
 var keys := 0
+var god_mode := false
 
 var yaw := 0.0
 var pitch := 0.0
@@ -41,6 +42,8 @@ var body_mesh: MeshInstance3D
 func _ready() -> void:
 	collision_layer = 2
 	collision_mask = 1 | 4
+	floor_snap_length = 0.42
+	safe_margin = 0.02
 	_process_mode_setup()
 	_build_body()
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -84,7 +87,7 @@ func _build_body() -> void:
 	interaction_ray.collision_mask = 1 | 4 | 8 | 16
 	camera.add_child(interaction_ray)
 
-func _unhandled_input(event: InputEvent) -> void:
+func _input(event: InputEvent) -> void:
 	if not input_enabled:
 		return
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
@@ -104,6 +107,10 @@ func _physics_process(delta: float) -> void:
 	magic_cooldown = max(magic_cooldown - delta, 0.0)
 	status_clock += delta
 	damage_flash = max(damage_flash - delta * 1.6, 0.0)
+	if god_mode:
+		health = max_health
+		stamina = max_stamina
+		mana = max_mana
 
 	var input_vector := Input.get_vector("move_left", "move_right", "move_forward", "move_backward")
 	var direction := (transform.basis * Vector3(input_vector.x, 0.0, input_vector.y)).normalized()
@@ -149,9 +156,12 @@ func _process(_delta: float) -> void:
 	current_focus_target = get_focus_target()
 
 func _perform_melee() -> void:
-	if melee_cooldown > 0.0 or stamina < MELEE_COST:
+	if melee_cooldown > 0.0:
 		return
-	stamina -= MELEE_COST
+	if not god_mode and stamina < MELEE_COST:
+		return
+	if not god_mode:
+		stamina -= MELEE_COST
 	melee_cooldown = 0.48
 	var shape := SphereShape3D.new()
 	shape.radius = 0.9
@@ -174,9 +184,12 @@ func _perform_melee() -> void:
 		emit_signal("notification", "No meaningful deviation detected.")
 
 func _cast_magic() -> void:
-	if magic_cooldown > 0.0 or mana < MAGIC_COST:
+	if magic_cooldown > 0.0:
 		return
-	mana -= MAGIC_COST
+	if not god_mode and mana < MAGIC_COST:
+		return
+	if not god_mode:
+		mana -= MAGIC_COST
 	magic_cooldown = 0.36
 	var direction := -camera.global_basis.z.normalized()
 	var origin := camera.global_transform.origin + direction * 0.7
@@ -287,6 +300,8 @@ func use_aether_charge() -> void:
 	emit_signal("notification", "Mana lattice replenished.")
 
 func apply_damage(amount: float, from_position := Vector3.ZERO) -> void:
+	if god_mode:
+		return
 	health -= amount
 	damage_flash = 1.0
 	if from_position != Vector3.ZERO:
@@ -306,6 +321,17 @@ func set_gameplay_enabled(enabled: bool) -> void:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	else:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+func toggle_god_mode() -> void:
+	god_mode = not god_mode
+	if god_mode:
+		health = max_health
+		stamina = max_stamina
+		mana = max_mana
+		emit_signal("notification", "Godmode enabled. No meaningful damage detected.")
+	else:
+		emit_signal("notification", "Godmode disabled. Structural liability restored.")
+	emit_signal("stats_changed")
 
 func _vec3_from_array(raw: Variant) -> Vector3:
 	if raw is Array and raw.size() >= 3:

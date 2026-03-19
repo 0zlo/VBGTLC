@@ -21,7 +21,7 @@ var dungeon_runtime = null
 var hub_terminal = null
 var autosave_timer := 0.0
 var notification_timer := 0.0
-var map_expanded := false
+var map_visible := true
 
 var menu_panel: PanelContainer
 var menu_status_label: RichTextLabel
@@ -58,7 +58,7 @@ func _process(delta: float) -> void:
 		notification_label.text = ""
 	if current_mode == "dungeon" and dungeon_runtime and player:
 		dungeon_runtime.update_discovery(player.global_position)
-		minimap.visible = true
+		minimap.visible = map_visible
 		minimap.set_player_pose(player.global_position, player.yaw)
 	elif current_mode == "hub":
 		minimap.visible = false
@@ -76,8 +76,9 @@ func _unhandled_input(_event: InputEvent) -> void:
 		if current_mode in ["hub", "dungeon"]:
 			_toggle_pause()
 	elif Input.is_action_just_pressed("toggle_map") and current_mode == "dungeon":
-		map_expanded = not map_expanded
-		minimap.custom_minimum_size = Vector2(420.0, 420.0) if map_expanded else Vector2(240.0, 240.0)
+		map_visible = not map_visible
+	elif Input.is_action_just_pressed("toggle_godmode") and current_mode in ["hub", "dungeon"] and player:
+		player.toggle_god_mode()
 
 func _setup_scene_graph() -> void:
 	world_root = get_node_or_null("WorldRoot") as Node3D
@@ -207,7 +208,7 @@ func _build_ui() -> void:
 
 	var controls := Label.new()
 	controls.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	controls.text = "Controls: WASD move, Shift sprint, Space jump, E interact, Left Mouse melee, Right Mouse continuity pulse, Q tonic, F aether, Tab map, Esc pause."
+	controls.text = "Controls: WASD move, Shift sprint, Space jump, E interact, Left Mouse melee, Right Mouse continuity pulse, Q tonic, F aether, Tab minimap, F10 godmode, Esc pause."
 	controls.add_theme_color_override("font_color", Color(0.74, 0.8, 0.84))
 	menu_vbox.add_child(controls)
 
@@ -420,6 +421,7 @@ func _enter_hub(from_save: bool) -> void:
 	death_panel.visible = false
 	get_tree().paused = false
 	current_mode = "hub"
+	map_visible = false
 	current_run_state["mode"] = "hub"
 	current_run_state["last_status"] = "staging room loaded correctly"
 	_clear_play_world()
@@ -533,6 +535,7 @@ func _enter_dungeon(from_save: bool) -> void:
 	death_panel.visible = false
 	get_tree().paused = false
 	current_mode = "dungeon"
+	map_visible = true
 	current_run_state["mode"] = "dungeon"
 	_clear_play_world()
 	_spawn_player()
@@ -558,6 +561,8 @@ func _enter_dungeon(from_save: bool) -> void:
 		player.rotation.y = 0.0
 		player.camera.rotation.x = 0.0
 	player.set_gameplay_enabled(true)
+	dungeon_runtime.update_discovery(player.global_position)
+	minimap.set_discovery(current_run_state.get("discovered_rooms", []), current_run_state.get("discovered_corridors", []))
 	current_run_state["last_status"] = "vault loaded correctly"
 	_snapshot_and_save()
 	_show_notification("Vault loaded correctly. Deviation monitoring active.")
@@ -583,7 +588,11 @@ func _update_hud() -> void:
 	mana_bar.max_value = player.max_mana
 	mana_bar.value = player.mana
 	inventory_label.text = "Keys %d | Tonics %d | Aether %d" % [player.keys, player.tonics, player.aether]
-	floor_label.text = "Mode: %s | Seed: %s" % [current_mode.capitalize(), current_run_state.get("seed_text", GameState.current_seed_text)]
+	floor_label.text = "Mode: %s | Seed: %s%s" % [
+		current_mode.capitalize(),
+		current_run_state.get("seed_text", GameState.current_seed_text),
+		" | GODMODE" if player.god_mode else ""
+	]
 	status_label.text = str(current_run_state.get("last_status", "geometry integrity nominal"))
 	prompt_label.text = player.get_prompt_text()
 	if dungeon_runtime:
@@ -676,7 +685,7 @@ func _show_notification(message: String) -> void:
 
 func _clear_play_world() -> void:
 	for child in play_root.get_children():
-		child.queue_free()
+		child.free()
 	player = null
 	dungeon_runtime = null
 	hub_terminal = null
@@ -697,6 +706,7 @@ func _ensure_input_actions() -> void:
 	_add_action_key("use_tonic", KEY_Q)
 	_add_action_key("use_aether", KEY_F)
 	_add_action_key("toggle_map", KEY_TAB)
+	_add_action_key("toggle_godmode", KEY_F10)
 	_add_action_key("pause", KEY_ESCAPE)
 	_add_action_mouse("attack_melee", MOUSE_BUTTON_LEFT)
 	_add_action_mouse("attack_magic", MOUSE_BUTTON_RIGHT)

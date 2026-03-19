@@ -28,11 +28,10 @@ func seed_text_to_value(seed_text: String) -> int:
 		trimmed = SAMPLE_SEEDS[0]
 	if trimmed.is_valid_int():
 		return abs(trimmed.to_int()) + 1
-	var hash_value: int = 146959810
+	var hash_value: int = 5381
 	for byte_value in trimmed.to_utf8_buffer():
-		hash_value = int((hash_value ^ byte_value) * 16777619)
-		hash_value = abs(hash_value % 2147483647)
-	return max(hash_value, 1)
+		hash_value = int((hash_value * 33 + int(byte_value)) % 2147483647)
+	return max(abs(hash_value), 1)
 
 func set_seed_text(seed_text: String) -> void:
 	current_seed_text = seed_text.strip_edges()

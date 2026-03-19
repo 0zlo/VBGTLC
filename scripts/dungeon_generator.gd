@@ -82,6 +82,7 @@ func generate(seed_value: int) -> Dictionary:
 		corridors.append(_make_corridor(rng, corridor_id, room_a, room_b))
 		corridor_id += 1
 
+	_register_room_openings(rooms, corridors)
 	_assign_special_rooms(rooms)
 	var goal_room_id := int(rooms[-1].get("goal_room_id", 0))
 	var key_room_id := int(rooms[-1].get("key_room_id", 0))
@@ -91,6 +92,7 @@ func generate(seed_value: int) -> Dictionary:
 	var doors := _make_doors(rng, corridors, locked_corridor_id)
 	var pickups := _make_pickups(rng, rooms, key_room_id, goal_room_id)
 	var enemies := _make_enemies(rng, rooms, goal_room_id)
+	_ensure_early_enemy(rng, rooms, corridors, enemies)
 
 	var entry_spawn := _sample_point_in_room(rng, _find_room(rooms, 0), false, true)
 	var goal_terminal := _sample_point_in_room(rng, _find_room(rooms, goal_room_id), true, false)
@@ -250,7 +252,10 @@ func _make_corridor(rng: RandomNumberGenerator, corridor_id: int, room_a: Dictio
 	var direction: Vector2 = (room_b["center"] - room_a["center"]).normalized()
 	var start_point := _ray_to_polygon(room_a["center"], direction, room_a["polygon"])
 	var end_point := _ray_to_polygon(room_b["center"], -direction, room_b["polygon"])
-	var width := rng.randf_range(2.6, 3.6)
+	var width: float = rng.randf_range(2.6, 3.6)
+	var inset: float = min(width * 0.28, 0.6)
+	start_point -= direction * inset
+	end_point += direction * inset
 	var perp := Vector2(-direction.y, direction.x) * width * 0.5
 	var polygon := PackedVector2Array([
 		start_point + perp,
@@ -402,6 +407,35 @@ func _make_enemies(rng: RandomNumberGenerator, rooms: Array, goal_room_id: int) 
 		enemy_id += 1
 	return enemies
 
+func _ensure_early_enemy(rng: RandomNumberGenerator, rooms: Array, corridors: Array, enemies: Array) -> void:
+	var target_room_id := -1
+	for corridor in corridors:
+		if int(corridor["room_a"]) == 0:
+			target_room_id = int(corridor["room_b"])
+			break
+		if int(corridor["room_b"]) == 0:
+			target_room_id = int(corridor["room_a"])
+			break
+	if target_room_id < 0:
+		return
+	for enemy in enemies:
+		if int(enemy["room_id"]) == target_room_id:
+			return
+	var room := _find_room(rooms, target_room_id)
+	if room.is_empty():
+		return
+	var patrol_points: Array = []
+	for _index in 3:
+		patrol_points.append(_sample_point_in_room(rng, room, false, false))
+	enemies.append({
+		"id": enemies.size(),
+		"room_id": target_room_id,
+		"position": _sample_point_in_room(rng, room, false, false),
+		"patrol_points": patrol_points,
+		"theme_id": room["theme_id"],
+		"is_guard": false
+	})
+
 func _sample_point_in_room(rng: RandomNumberGenerator, room: Dictionary, prefer_platform: bool, keep_center: bool) -> Vector3:
 	var polygon: PackedVector2Array = room["polygon"]
 	var height_area := room
@@ -423,6 +457,24 @@ func _sample_point_in_room(rng: RandomNumberGenerator, room: Dictionary, prefer_
 			return Vector3(candidate.x, y + 0.35, candidate.y)
 	var fallback_y := GeometryBuilderClass.area_floor_height(height_area, center)
 	return Vector3(center.x, fallback_y + 0.35, center.y)
+
+func _register_room_openings(rooms: Array, corridors: Array) -> void:
+	for room in rooms:
+		room["wall_openings"] = []
+	for corridor in corridors:
+		_append_room_opening(rooms, int(corridor["room_a"]), corridor["start_anchor"], float(corridor["width"]) + 0.9)
+		_append_room_opening(rooms, int(corridor["room_b"]), corridor["end_anchor"], float(corridor["width"]) + 0.9)
+
+func _append_room_opening(rooms: Array, room_id: int, point: Vector2, width: float) -> void:
+	var room := _find_room(rooms, room_id)
+	if room.is_empty():
+		return
+	if not room.has("wall_openings"):
+		room["wall_openings"] = []
+	room["wall_openings"].append({
+		"point": point,
+		"width": width
+	})
 
 func _ray_to_polygon(origin: Vector2, direction: Vector2, polygon: PackedVector2Array) -> Vector2:
 	var best := origin
