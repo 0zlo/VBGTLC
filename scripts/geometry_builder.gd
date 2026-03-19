@@ -55,6 +55,7 @@ static func make_theme_material(theme: Dictionary, brightness: float = 1.0, emis
 	material.roughness = 0.92
 	material.metallic = theme.get("metallic", 0.08)
 	material.vertex_color_use_as_albedo = false
+	material.cull_mode = BaseMaterial3D.CULL_DISABLED
 	material.emission_enabled = true
 	material.emission = theme.get("emission", base_color) * (0.05 + emission_boost)
 	return material
@@ -73,7 +74,10 @@ static func build_area_node(area: Dictionary, theme: Dictionary) -> Node3D:
 	body.collision_layer = 1
 	body.collision_mask = 0
 	var collider := CollisionShape3D.new()
-	collider.shape = mesh.create_trimesh_shape()
+	var collision_shape := mesh.create_trimesh_shape()
+	if collision_shape is ConcavePolygonShape3D:
+		collision_shape.backface_collision = true
+	collider.shape = collision_shape
 	body.add_child(collider)
 	node.add_child(body)
 	return node

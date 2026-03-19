@@ -14,6 +14,7 @@ const MELEE_RANGE := 2.0
 const MELEE_COST := 18.0
 const MAGIC_COST := 15.0
 const GRAVITY := 18.0
+const GOD_SPEED := 15.5
 
 var max_health := 100.0
 var health := 100.0
@@ -111,6 +112,21 @@ func _physics_process(delta: float) -> void:
 		health = max_health
 		stamina = max_stamina
 		mana = max_mana
+		_process_god_mode_movement(delta)
+		if Input.is_action_just_pressed("attack_melee"):
+			_perform_melee()
+		if Input.is_action_just_pressed("attack_magic"):
+			_cast_magic()
+		if Input.is_action_just_pressed("interact"):
+			var god_target := get_focus_target()
+			if god_target and god_target.has_method("interact"):
+				god_target.interact(self)
+		if Input.is_action_just_pressed("use_tonic"):
+			use_tonic()
+		if Input.is_action_just_pressed("use_aether"):
+			use_aether_charge()
+		emit_signal("stats_changed")
+		return
 
 	var input_vector := Input.get_vector("move_left", "move_right", "move_forward", "move_backward")
 	var direction := (transform.basis * Vector3(input_vector.x, 0.0, input_vector.y)).normalized()
@@ -325,13 +341,33 @@ func set_gameplay_enabled(enabled: bool) -> void:
 func toggle_god_mode() -> void:
 	god_mode = not god_mode
 	if god_mode:
+		collision_layer = 0
+		collision_mask = 0
+		velocity = Vector3.ZERO
 		health = max_health
 		stamina = max_stamina
 		mana = max_mana
 		emit_signal("notification", "Godmode enabled. No meaningful damage detected.")
 	else:
+		collision_layer = 2
+		collision_mask = 1 | 4
+		velocity = Vector3.ZERO
 		emit_signal("notification", "Godmode disabled. Structural liability restored.")
 	emit_signal("stats_changed")
+
+func _process_god_mode_movement(delta: float) -> void:
+	var planar_input := Input.get_vector("move_left", "move_right", "move_forward", "move_backward")
+	var camera_basis := camera.global_basis
+	var flat_forward := -camera_basis.z
+	var flat_right := camera_basis.x
+	var vertical_axis := 0.0
+	if Input.is_action_pressed("jump"):
+		vertical_axis += 1.0
+	if Input.is_action_pressed("sprint"):
+		vertical_axis -= 1.0
+	var move_direction := flat_right * planar_input.x + flat_forward * planar_input.y + Vector3.UP * vertical_axis
+	if move_direction.length_squared() > 0.001:
+		global_position += move_direction.normalized() * GOD_SPEED * delta
 
 func _vec3_from_array(raw: Variant) -> Vector3:
 	if raw is Array and raw.size() >= 3:

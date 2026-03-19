@@ -283,7 +283,17 @@ func _make_corridor(rng: RandomNumberGenerator, corridor_id: int, room_a: Dictio
 		"brightness": rng.randf_range(0.86, 0.98),
 		"width": width,
 		"start_anchor": start_point,
-		"end_anchor": end_point
+		"end_anchor": end_point,
+		"wall_openings": [
+			{
+				"point": start_point,
+				"width": width + 1.0
+			},
+			{
+				"point": end_point,
+				"width": width + 1.0
+			}
+		]
 	}
 
 func _collect_extra_pairs(rooms: Array, corridors: Array) -> Array:

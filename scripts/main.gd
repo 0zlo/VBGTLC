@@ -208,7 +208,7 @@ func _build_ui() -> void:
 
 	var controls := Label.new()
 	controls.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	controls.text = "Controls: WASD move, Shift sprint, Space jump, E interact, Left Mouse melee, Right Mouse continuity pulse, Q tonic, F aether, Tab minimap, F10 godmode, Esc pause."
+	controls.text = "Controls: WASD move, Shift sprint or descend in godmode, Space jump or ascend in godmode, E interact, Left Mouse melee, Right Mouse continuity pulse, Q tonic, F aether, Tab minimap, F10 godmode, Esc pause."
 	controls.add_theme_color_override("font_color", Color(0.74, 0.8, 0.84))
 	menu_vbox.add_child(controls)
 
