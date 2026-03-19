@@ -1,0 +1,11 @@
+# Godot generated artifacts
+.godot/
+.import/
+*.translation
+
+# Local tooling state
+.godot-portable/
+
+# Export output
+/build/*
+!/build/.gitkeep
