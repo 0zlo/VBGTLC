@@ -80,7 +80,7 @@ Godmode notes:
 - The preview goes straight into the generated dungeon, enables godmode, and does not overwrite the active save.
 - Press `F3` in a dungeon run to toggle join-debug gizmos and the on-screen report panel.
 - Press `F4` to print the full join validation report to the Godot console/log.
-- The debug view renders corridor centerlines, endpoint anchors, the authoritative room edge chosen at generation time, the edge later used during carving, room opening spans, corridor end spans, and marks suspicious or failed joins in warmer colors.
+- The debug view renders corridor centerlines, exact corridor polygons, endpoint anchors, the authoritative room edge chosen at generation time, the edge later used during carving, the exact intersection points on the host wall, the final portal span chosen from those points, corridor end spans, and marks suspicious or failed joins in warmer colors.
 - Validation output reports missing openings, authoritative edge mismatches, corner-hugging portals, and corridors that appear wider than their host wall segment.
 
 ## Sample Seeds

@@ -16,6 +16,8 @@ const USED_EDGE_MISMATCH_COLOR := Color(1.0, 0.55, 0.28, 0.95)
 const BEST_GUESS_EDGE_COLOR := Color(0.96, 0.6, 1.0, 0.45)
 const PROJECTION_COLOR := Color(1.0, 0.96, 0.55, 0.78)
 const ROOM_WALL_POINT_COLOR := Color(0.64, 0.94, 1.0, 1.0)
+const CORRIDOR_POLYGON_COLOR := Color(0.43, 0.82, 1.0, 0.3)
+const INTERSECTION_POINT_COLOR := Color(1.0, 0.95, 0.55, 1.0)
 const ANCHOR_MARKER_SIZE := 0.38
 
 var layout: Dictionary = {}
@@ -68,6 +70,7 @@ func _draw_corridor_centerlines(line_mesh: ImmediateMesh, debug_data: Dictionary
 		var corridor_id := int(corridor.get("id", -1))
 		var status := str(status_by_corridor.get(corridor_id, "ok"))
 		var color: Color = STATUS_COLORS.get(status, STATUS_COLORS["ok"])
+		_draw_area_outline(line_mesh, corridor, CORRIDOR_POLYGON_COLOR, 0.08)
 		var start_anchor: Vector2 = corridor.get("start_anchor", Vector2.ZERO)
 		var end_anchor: Vector2 = corridor.get("end_anchor", Vector2.ZERO)
 		var start := Vector3(start_anchor.x, float(corridor.get("start_y", 0.0)) + 0.18, start_anchor.y)
@@ -121,6 +124,11 @@ func _draw_join_gizmos(line_mesh: ImmediateMesh, debug_data: Dictionary) -> void
 		if not room_span.is_empty():
 			_draw_match_span(line_mesh, room, room_span, ROOM_SPAN_COLOR, 0.26)
 
+		for hit_point_variant in join.get("portal_intersection_points", []):
+			var hit_point: Vector2 = hit_point_variant
+			var hit_marker := Vector3(hit_point.x, _area_height(room, hit_point) + 0.34, hit_point.y)
+			_draw_cross(line_mesh, hit_marker, ANCHOR_MARKER_SIZE * 0.34, INTERSECTION_POINT_COLOR)
+
 		var corridor_span: Dictionary = join.get("corridor_opening_span", {})
 		if not corridor_span.is_empty():
 			_draw_match_span(line_mesh, corridor, corridor_span, CORRIDOR_SPAN_COLOR, 0.36)
@@ -150,6 +158,17 @@ func _draw_match_span(line_mesh: ImmediateMesh, area: Dictionary, match_report: 
 	var from_point := Vector3(span_from.x, _area_height(area, span_from) + y_offset, span_from.y)
 	var to_point := Vector3(span_to.x, _area_height(area, span_to) + y_offset, span_to.y)
 	_add_line(line_mesh, from_point, to_point, color)
+
+func _draw_area_outline(line_mesh: ImmediateMesh, area: Dictionary, color: Color, y_offset: float) -> void:
+	var polygon: PackedVector2Array = area.get("polygon", PackedVector2Array())
+	if polygon.size() < 2:
+		return
+	for index in polygon.size():
+		var point_a: Vector2 = polygon[index]
+		var point_b: Vector2 = polygon[(index + 1) % polygon.size()]
+		var from_point := Vector3(point_a.x, _area_height(area, point_a) + y_offset, point_a.y)
+		var to_point := Vector3(point_b.x, _area_height(area, point_b) + y_offset, point_b.y)
+		_add_line(line_mesh, from_point, to_point, color)
 
 func _anchor_height(anchor: Vector2, area: Dictionary) -> float:
 	return _area_height(area, anchor)

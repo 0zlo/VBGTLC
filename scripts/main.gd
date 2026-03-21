@@ -878,6 +878,13 @@ func _build_join_debug_text(debug_data: Dictionary) -> String:
 				_join_edge_summary(join)
 			]
 		)
+		lines.append(
+			"portal hits %s | span %s | width %.2f" % [
+				_format_point_list(join.get("portal_intersection_points", [])),
+				_format_span(join.get("room_opening_span", {})),
+				float(join.get("portal_span_length", 0.0))
+			]
+		)
 		lines.append(_format_reason_line(join.get("reasons", [])))
 		lines.append("")
 	if suspicious_joins.size() > limit:
@@ -912,7 +919,7 @@ func _format_join_log_line(join: Dictionary) -> String:
 	var edge_distance := float(inferred_edge.get("distance", -1.0))
 	var corner_clearance := float(inferred_edge.get("corner_clearance", -1.0))
 	return (
-		"[JoinDebug] %s corridor=%d end=%s room=%d corridor_anchor=%s wall_point=%s offset=%.2f auth_edge=%s used_edge=%s same_edge=%s room_registered=%s room_carveable=%s corridor_marked=%s corridor_carveable=%s wall_len=%.2f dist=%.2f corner=%.2f reasons=%s"
+		"[JoinDebug] %s corridor=%d end=%s room=%d corridor_anchor=%s wall_point=%s offset=%.2f auth_edge=%s used_edge=%s same_edge=%s hits=%s span=%s span_width=%.2f room_registered=%s room_carveable=%s corridor_marked=%s corridor_carveable=%s wall_len=%.2f dist=%.2f corner=%.2f reasons=%s"
 		% [
 			str(join.get("status", "ok")).to_upper(),
 			int(join.get("corridor_id", -1)),
@@ -924,6 +931,9 @@ func _format_join_log_line(join: Dictionary) -> String:
 			_format_edge_index(join.get("authoritative_room_edge_index", -1)),
 			_format_edge_index(join.get("room_edge_used_index", -1)),
 			str(bool(join.get("room_edge_matches_authoritative", false))),
+			_format_point_list(join.get("portal_intersection_points", [])),
+			_format_span(join.get("room_opening_span", {})),
+			float(join.get("portal_span_length", 0.0)),
 			str(bool(join.get("room_opening_registered", false))),
 			str(bool(join.get("room_opening_carveable", false))),
 			str(bool(join.get("corridor_end_marked", false))),
@@ -967,6 +977,22 @@ func _format_vector2(value: Variant) -> String:
 func _format_edge_index(value: Variant) -> String:
 	var edge_index := int(value)
 	return "?" if edge_index < 0 else str(edge_index)
+
+func _format_point_list(points: Array) -> String:
+	if points.is_empty():
+		return "[]"
+	var parts: Array = []
+	for point_variant in points:
+		parts.append(_format_vector2(point_variant))
+	return "[%s]" % _join_strings(parts, ", ")
+
+func _format_span(span: Dictionary) -> String:
+	if span.is_empty():
+		return "none"
+	return "%s -> %s" % [
+		_format_vector2(span.get("span_from", Vector2.ZERO)),
+		_format_vector2(span.get("span_to", Vector2.ZERO))
+	]
 
 func _join_strings(values: Array, separator: String) -> String:
 	var parts: String = ""

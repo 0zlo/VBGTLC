@@ -256,8 +256,6 @@ func _make_corridor(rng: RandomNumberGenerator, corridor_id: int, room_a: Dictio
 	var end_hit: Dictionary = _ray_to_polygon_hit(room_b["center"], -direction, room_b["polygon"])
 	var start_wall_point: Vector2 = start_hit.get("point", room_a["center"])
 	var end_wall_point: Vector2 = end_hit.get("point", room_b["center"])
-	var start_host_edge_index := int(start_hit.get("edge_index", -1))
-	var end_host_edge_index := int(end_hit.get("edge_index", -1))
 	var width: float = rng.randf_range(2.6, 3.6)
 	var inset: float = min(width * 0.28, 0.6)
 	var start_point := start_wall_point - direction * inset
@@ -269,6 +267,14 @@ func _make_corridor(rng: RandomNumberGenerator, corridor_id: int, room_a: Dictio
 		end_point - perp,
 		end_point + perp
 	])
+	var start_host_edge := _resolve_host_edge_for_corridor(room_a, polygon, start_hit)
+	var end_host_edge := _resolve_host_edge_for_corridor(room_b, polygon, end_hit)
+	var start_host_edge_index := int(start_host_edge.get("edge_index", int(start_hit.get("edge_index", -1))))
+	var end_host_edge_index := int(end_host_edge.get("edge_index", int(end_hit.get("edge_index", -1))))
+	var start_host_edge_from: Vector2 = start_host_edge.get("edge_from", start_hit.get("edge_from", start_wall_point))
+	var start_host_edge_to: Vector2 = start_host_edge.get("edge_to", start_hit.get("edge_to", start_wall_point))
+	var end_host_edge_from: Vector2 = end_host_edge.get("edge_from", end_hit.get("edge_from", end_wall_point))
+	var end_host_edge_to: Vector2 = end_host_edge.get("edge_to", end_hit.get("edge_to", end_wall_point))
 	var start_y := GeometryBuilderClass.area_floor_height(room_a, start_point)
 	var end_y := GeometryBuilderClass.area_floor_height(room_b, end_point)
 	return {
@@ -295,6 +301,12 @@ func _make_corridor(rng: RandomNumberGenerator, corridor_id: int, room_a: Dictio
 		"end_wall_point": end_wall_point,
 		"start_host_edge_index": start_host_edge_index,
 		"end_host_edge_index": end_host_edge_index,
+		"start_host_edge_from": start_host_edge_from,
+		"start_host_edge_to": start_host_edge_to,
+		"end_host_edge_from": end_host_edge_from,
+		"end_host_edge_to": end_host_edge_to,
+		"start_edge_resolution_mode": str(start_host_edge.get("resolution_mode", "ray_hit")),
+		"end_edge_resolution_mode": str(end_host_edge.get("resolution_mode", "ray_hit")),
 		"wall_openings": [
 			{
 				"point": start_point,
@@ -506,7 +518,10 @@ func _register_room_openings(rooms: Array, corridors: Array) -> void:
 			float(corridor["width"]) + 0.9,
 			int(corridor["room_b"]),
 			corridor.get("start_anchor", corridor.get("start_wall_point", Vector2.ZERO)),
-			int(corridor.get("start_host_edge_index", -1))
+			int(corridor.get("start_host_edge_index", -1)),
+			corridor.get("start_host_edge_from", corridor.get("start_wall_point", Vector2.ZERO)),
+			corridor.get("start_host_edge_to", corridor.get("start_wall_point", Vector2.ZERO)),
+			corridor.get("polygon", PackedVector2Array())
 		)
 		_append_room_opening(
 			rooms,
@@ -517,10 +532,13 @@ func _register_room_openings(rooms: Array, corridors: Array) -> void:
 			float(corridor["width"]) + 0.9,
 			int(corridor["room_a"]),
 			corridor.get("end_anchor", corridor.get("end_wall_point", Vector2.ZERO)),
-			int(corridor.get("end_host_edge_index", -1))
+			int(corridor.get("end_host_edge_index", -1)),
+			corridor.get("end_host_edge_from", corridor.get("end_wall_point", Vector2.ZERO)),
+			corridor.get("end_host_edge_to", corridor.get("end_wall_point", Vector2.ZERO)),
+			corridor.get("polygon", PackedVector2Array())
 		)
 
-func _append_room_opening(rooms: Array, room_id: int, corridor_id: int, end_key: String, point: Vector2, width: float, connected_room_id: int, corridor_anchor_point: Vector2, target_edge_index: int) -> void:
+func _append_room_opening(rooms: Array, room_id: int, corridor_id: int, end_key: String, point: Vector2, width: float, connected_room_id: int, corridor_anchor_point: Vector2, target_edge_index: int, target_edge_from: Vector2, target_edge_to: Vector2, corridor_polygon: PackedVector2Array) -> void:
 	var room := _find_room(rooms, room_id)
 	if room.is_empty():
 		return
@@ -536,7 +554,10 @@ func _append_room_opening(rooms: Array, room_id: int, corridor_id: int, end_key:
 		"connected_room_id": connected_room_id,
 		"room_wall_point": point,
 		"corridor_anchor_point": corridor_anchor_point,
-		"target_edge_index": target_edge_index
+		"target_edge_index": target_edge_index,
+		"target_edge_from": target_edge_from,
+		"target_edge_to": target_edge_to,
+		"corridor_polygon": corridor_polygon.duplicate()
 	})
 
 func _build_join_debug(seed_value: int, rooms: Array, corridors: Array) -> Dictionary:
@@ -620,11 +641,18 @@ func _build_join_report(corridor: Dictionary, end_key: String, room_analysis_by_
 	var room_opening_report := _find_opening_report(room_analysis.get("openings", []), corridor_id, end_key, "room_join")
 	var corridor_opening_report := _find_opening_report(corridor_analysis.get("openings", []), corridor_id, end_key, "corridor_end")
 	var best_match: Dictionary = room_opening_report.get("best_match", {})
-	var authoritative_room_edge: Dictionary = _find_edge_report(room_analysis, authoritative_room_edge_index)
+	var authoritative_room_edge: Dictionary = {
+		"edge_index": authoritative_room_edge_index,
+		"edge_from": corridor.get("start_host_edge_from", room_wall_point) if is_start else corridor.get("end_host_edge_from", room_wall_point),
+		"edge_to": corridor.get("start_host_edge_to", room_wall_point) if is_start else corridor.get("end_host_edge_to", room_wall_point),
+		"edge_length": corridor.get("start_host_edge_from", room_wall_point).distance_to(corridor.get("start_host_edge_to", room_wall_point)) if is_start else corridor.get("end_host_edge_from", room_wall_point).distance_to(corridor.get("end_host_edge_to", room_wall_point))
+	}
 	var used_room_edge_index := int(room_opening_report.get("used_edge_index", -1))
 	var used_room_edge: Dictionary = _find_edge_report(room_analysis, used_room_edge_index)
 	var nearest_room_edge: Dictionary = room_opening_report.get("nearest_match", {})
 	var room_edge_matches_authoritative := authoritative_room_edge_index >= 0 and used_room_edge_index == authoritative_room_edge_index and bool(room_opening_report.get("used_authoritative_edge", false))
+	var exact_portal_reasons: Array = room_opening_report.get("failure_reasons", []).duplicate(true)
+	var portal_intersection_points: Array = room_opening_report.get("intersection_points", []).duplicate(true)
 	var reasons: Array = []
 	var room_opening_registered := not room_opening_report.is_empty()
 	var corridor_end_marked := not corridor_opening_report.is_empty()
@@ -636,9 +664,12 @@ func _build_join_report(corridor: Dictionary, end_key: String, room_analysis_by_
 		reasons.append("no opening registered on room side")
 	if not corridor_end_marked:
 		reasons.append("corridor did not mark its own end opening")
-	if not room_carveable and not corridor_carveable:
+	for portal_reason in exact_portal_reasons:
+		if not reasons.has(portal_reason):
+			reasons.append(portal_reason)
+	if not room_opening_registered and not corridor_end_marked:
 		reasons.append("no opening registered on either side")
-	elif not room_carveable or not corridor_carveable:
+	elif not room_opening_registered or not corridor_end_marked:
 		reasons.append("no opening registered on one side")
 	if room_opening_registered and authoritative_room_edge_index >= 0 and used_room_edge_index != authoritative_room_edge_index:
 		reasons.append("authoritative room edge not used")
@@ -648,7 +679,7 @@ func _build_join_report(corridor: Dictionary, end_key: String, room_analysis_by_
 		if intended_room_width > float(best_match.get("edge_length", 0.0)) * 0.9:
 			reasons.append("corridor width too large for the host wall segment")
 	var status := "ok"
-	if reasons.has("no opening registered on either side") or reasons.has("no authoritative room edge"):
+	if reasons.has("no opening registered on either side") or reasons.has("no authoritative room edge") or not exact_portal_reasons.is_empty():
 		status = "failed"
 	elif reasons.size() > 0:
 		status = "suspicious"
@@ -674,6 +705,10 @@ func _build_join_report(corridor: Dictionary, end_key: String, room_analysis_by_
 		"room_opening_edge_source": str(room_opening_report.get("edge_source", "none")),
 		"nearest_room_edge": nearest_room_edge,
 		"inferred_room_edge": best_match,
+		"portal_intersection_points": portal_intersection_points,
+		"portal_intersection_count": int(room_opening_report.get("intersection_count", portal_intersection_points.size())),
+		"portal_failure_reasons": exact_portal_reasons,
+		"portal_span_length": float(room_opening_report.get("span_length", 0.0)),
 		"accepted_room_edge_indices": room_opening_report.get("accepted_edge_indices", []).duplicate(true),
 		"accepted_corridor_edge_indices": corridor_opening_report.get("accepted_edge_indices", []).duplicate(true),
 		"room_opening_registered": room_opening_registered,
@@ -711,6 +746,81 @@ func _preferred_span(opening_report: Dictionary) -> Dictionary:
 	if not accepted_matches.is_empty():
 		return accepted_matches[0]
 	return opening_report.get("best_match", {})
+
+func _resolve_host_edge_for_corridor(room: Dictionary, corridor_polygon: PackedVector2Array, preferred_hit: Dictionary) -> Dictionary:
+	var polygon: PackedVector2Array = room.get("polygon", PackedVector2Array())
+	var preferred_point: Vector2 = preferred_hit.get("point", room.get("center", Vector2.ZERO))
+	var preferred_edge_index := int(preferred_hit.get("edge_index", -1))
+	var best_valid: Dictionary = {}
+	var best_rejected: Dictionary = {}
+	for edge_index in polygon.size():
+		var opening_data := {
+			"point": preferred_point,
+			"target_edge_index": edge_index,
+			"corridor_polygon": corridor_polygon
+		}
+		var analysis: Dictionary = GeometryBuilderClass.inspect_wall_openings(polygon, [opening_data])
+		var openings: Array = analysis.get("openings", [])
+		if openings.is_empty():
+			continue
+		var opening_report: Dictionary = openings[0]
+		var match: Dictionary = opening_report.get("best_match", {})
+		var candidate := {
+			"edge_index": edge_index,
+			"edge_from": polygon[edge_index],
+			"edge_to": polygon[(edge_index + 1) % polygon.size()],
+			"span_length": float(opening_report.get("span_length", 0.0)),
+			"corner_clearance": float(match.get("corner_clearance", 0.0)),
+			"accepted": bool(opening_report.get("accepted", false)),
+			"intersection_count": int(opening_report.get("intersection_count", 0)),
+			"resolution_mode": "exact_span"
+		}
+		if candidate["accepted"]:
+			if _is_better_host_edge_candidate(candidate, best_valid, preferred_edge_index):
+				best_valid = candidate
+		elif _is_better_host_edge_candidate(candidate, best_rejected, preferred_edge_index):
+			best_rejected = candidate
+	if not best_valid.is_empty():
+		return best_valid
+	if preferred_edge_index >= 0:
+		return {
+			"edge_index": preferred_edge_index,
+			"edge_from": preferred_hit.get("edge_from", preferred_point),
+			"edge_to": preferred_hit.get("edge_to", preferred_point),
+			"resolution_mode": "ray_hit"
+		}
+	if not best_rejected.is_empty():
+		best_rejected["resolution_mode"] = "exact_span_rejected"
+		return best_rejected
+	return {
+		"edge_index": -1,
+		"edge_from": preferred_point,
+		"edge_to": preferred_point,
+		"resolution_mode": "missing"
+	}
+
+func _is_better_host_edge_candidate(candidate: Dictionary, current_best: Dictionary, preferred_edge_index: int) -> bool:
+	if current_best.is_empty():
+		return true
+	var candidate_accepted := bool(candidate.get("accepted", false))
+	var best_accepted := bool(current_best.get("accepted", false))
+	if candidate_accepted != best_accepted:
+		return candidate_accepted
+	var candidate_hits := int(candidate.get("intersection_count", 0))
+	var best_hits := int(current_best.get("intersection_count", 0))
+	if candidate_hits != best_hits:
+		return candidate_hits > best_hits
+	var candidate_span := float(candidate.get("span_length", 0.0))
+	var best_span := float(current_best.get("span_length", 0.0))
+	if abs(candidate_span - best_span) > 0.02:
+		return candidate_span > best_span
+	var candidate_clearance := float(candidate.get("corner_clearance", 0.0))
+	var best_clearance := float(current_best.get("corner_clearance", 0.0))
+	if abs(candidate_clearance - best_clearance) > 0.02:
+		return candidate_clearance > best_clearance
+	if int(candidate.get("edge_index", -1)) == preferred_edge_index and int(current_best.get("edge_index", -1)) != preferred_edge_index:
+		return true
+	return false
 
 func _find_edge_report(analysis: Dictionary, edge_index: int) -> Dictionary:
 	if edge_index < 0:

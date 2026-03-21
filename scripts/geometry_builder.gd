@@ -1,6 +1,8 @@
 extends RefCounted
 class_name GeometryBuilder
 
+const MIN_PORTAL_TRAVERSAL_WIDTH := 1.0
+
 static func polygon_centroid(polygon: PackedVector2Array) -> Vector2:
 	if polygon.is_empty():
 		return Vector2.ZERO
@@ -131,15 +133,18 @@ static func inspect_wall_openings(polygon: PackedVector2Array, wall_openings: Ar
 		var edge_source := "inferred"
 		var used_authoritative_edge := false
 		if target_edge_valid:
-			var authoritative_match: Dictionary = all_matches[target_edge_index].duplicate(true)
-			authoritative_match["accepted"] = float(authoritative_match.get("edge_length", 0.0)) > 0.05
-			authoritative_match["match_mode"] = "authoritative"
+			var authoritative_edge_report: Dictionary = edge_reports[target_edge_index]
+			var authoritative_match: Dictionary = _inspect_exact_portal_on_edge(
+				authoritative_edge_report.get("from", Vector2.ZERO),
+				authoritative_edge_report.get("to", Vector2.ZERO),
+				opening_data,
+				target_edge_index
+			)
 			resolved_match = authoritative_match
-			edge_source = "authoritative"
+			edge_source = "authoritative_exact"
 			used_authoritative_edge = true
 			if bool(authoritative_match.get("accepted", false)):
 				accepted_matches.append(authoritative_match)
-				var authoritative_edge_report: Dictionary = edge_reports[target_edge_index]
 				var authoritative_edge_matches: Array = authoritative_edge_report.get("accepted_matches", [])
 				authoritative_edge_matches.append(authoritative_match)
 				authoritative_edge_report["accepted_matches"] = authoritative_edge_matches
@@ -173,6 +178,12 @@ static func inspect_wall_openings(polygon: PackedVector2Array, wall_openings: Ar
 		opening_report["used_edge_index"] = used_edge_index
 		opening_report["used_authoritative_edge"] = used_authoritative_edge and used_edge_index == target_edge_index
 		opening_report["edge_source"] = edge_source
+		opening_report["failure_reasons"] = resolved_match.get("failure_reasons", []).duplicate(true)
+		opening_report["intersection_reports"] = resolved_match.get("intersection_reports", []).duplicate(true)
+		opening_report["intersection_points"] = resolved_match.get("intersection_points", []).duplicate(true)
+		opening_report["intersection_count"] = int(resolved_match.get("intersection_count", 0))
+		opening_report["span_length"] = float(resolved_match.get("span_length", 0.0))
+		opening_report["used_exact_geometry"] = bool(resolved_match.get("used_exact_geometry", false))
 		opening_reports.append(opening_report)
 	return {
 		"polygon": normalized_polygon,
@@ -291,6 +302,110 @@ static func _inspect_opening_on_edge(from_point: Vector2, to_point: Vector2, ope
 		"corner_clearance": corner_clearance,
 		"width_ratio": opening_width / max(edge_length, 0.001)
 	}
+
+static func _inspect_exact_portal_on_edge(from_point: Vector2, to_point: Vector2, opening_data: Dictionary, edge_index: int) -> Dictionary:
+	var edge_length := from_point.distance_to(to_point)
+	var opening_point: Vector2 = opening_data.get("point", from_point)
+	var corridor_polygon: PackedVector2Array = ensure_ccw(opening_data.get("corridor_polygon", PackedVector2Array()))
+	var intersection_reports: Array = _collect_wall_polygon_intersections(from_point, to_point, corridor_polygon)
+	var failure_reasons: Array = []
+	if corridor_polygon.size() < 3:
+		failure_reasons.append("no usable wall/corridor span")
+	if intersection_reports.size() != 2:
+		failure_reasons.append("portal span missing two valid intersections")
+
+	var span_start_t := 0.0
+	var span_end_t := 0.0
+	var span_from := from_point
+	var span_to := from_point
+	var span_length := 0.0
+	var opening_t := _segment_t(from_point, to_point, opening_point)
+
+	if intersection_reports.size() == 2:
+		var first_hit: Dictionary = intersection_reports[0]
+		var second_hit: Dictionary = intersection_reports[1]
+		span_start_t = min(float(first_hit.get("t", 0.0)), float(second_hit.get("t", 0.0)))
+		span_end_t = max(float(first_hit.get("t", 0.0)), float(second_hit.get("t", 0.0)))
+		span_from = from_point.lerp(to_point, span_start_t)
+		span_to = from_point.lerp(to_point, span_end_t)
+		span_length = span_from.distance_to(span_to)
+		opening_t = (span_start_t + span_end_t) * 0.5
+		if span_end_t - span_start_t <= 0.002 or span_length <= 0.05:
+			failure_reasons.append("portal span degenerate")
+		if span_length < MIN_PORTAL_TRAVERSAL_WIDTH:
+			failure_reasons.append("portal span too narrow for traversal")
+
+	if edge_length <= 0.05 and not failure_reasons.has("portal span degenerate"):
+		failure_reasons.append("portal span degenerate")
+	if not failure_reasons.is_empty() and not failure_reasons.has("no usable wall/corridor span") and intersection_reports.is_empty():
+		failure_reasons.append("no usable wall/corridor span")
+
+	var nearest_point := from_point.lerp(to_point, opening_t)
+	var corner_clearance: float = min(span_start_t, 1.0 - span_end_t) * edge_length if intersection_reports.size() == 2 else min(opening_t, 1.0 - opening_t) * edge_length
+	var intersection_points: Array = []
+	for hit_variant in intersection_reports:
+		var hit_report: Dictionary = hit_variant
+		intersection_points.append(hit_report.get("point", Vector2.ZERO))
+	return {
+		"edge_index": edge_index,
+		"edge_from": from_point,
+		"edge_to": to_point,
+		"edge_length": edge_length,
+		"opening_t": opening_t,
+		"nearest_point": nearest_point,
+		"distance": 0.0,
+		"accepted": failure_reasons.is_empty(),
+		"half_t": max((span_end_t - span_start_t) * 0.5, 0.0),
+		"span_start_t": span_start_t,
+		"span_end_t": span_end_t,
+		"span_from": span_from,
+		"span_to": span_to,
+		"corner_clearance": corner_clearance,
+		"width_ratio": span_length / max(edge_length, 0.001),
+		"span_length": span_length,
+		"intersection_reports": intersection_reports,
+		"intersection_points": intersection_points,
+		"intersection_count": intersection_reports.size(),
+		"failure_reasons": failure_reasons,
+		"match_mode": "exact_intersection",
+		"used_exact_geometry": true
+	}
+
+static func _collect_wall_polygon_intersections(from_point: Vector2, to_point: Vector2, polygon: PackedVector2Array) -> Array:
+	var hits: Array = []
+	if polygon.size() < 2:
+		return hits
+	for edge_index in polygon.size():
+		var point_a: Vector2 = polygon[edge_index]
+		var point_b: Vector2 = polygon[(edge_index + 1) % polygon.size()]
+		var hit: Variant = Geometry2D.segment_intersects_segment(from_point, to_point, point_a, point_b)
+		if hit == null:
+			continue
+		hits.append({
+			"point": hit,
+			"t": _segment_t(from_point, to_point, hit),
+			"polygon_edge_index": edge_index,
+			"polygon_edge_from": point_a,
+			"polygon_edge_to": point_b
+		})
+	return _dedupe_wall_hits(hits)
+
+static func _dedupe_wall_hits(hit_reports: Array) -> Array:
+	var unique_hits: Array = []
+	for hit_variant in hit_reports:
+		var hit_report: Dictionary = hit_variant
+		var hit_point: Vector2 = hit_report.get("point", Vector2.ZERO)
+		var hit_t := float(hit_report.get("t", 0.0))
+		var duplicate := false
+		for existing_variant in unique_hits:
+			var existing_hit: Dictionary = existing_variant
+			if hit_point.distance_to(existing_hit.get("point", Vector2.ZERO)) <= 0.02 or abs(hit_t - float(existing_hit.get("t", 0.0))) <= 0.005:
+				duplicate = true
+				break
+		if not duplicate:
+			unique_hits.append(hit_report)
+	unique_hits.sort_custom(func(a, b): return float(a.get("t", 0.0)) < float(b.get("t", 0.0)))
+	return unique_hits
 
 static func _collect_match_edge_indices(match_reports: Array) -> Array:
 	var indices: Array = []
