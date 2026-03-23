@@ -224,7 +224,7 @@ func _build_ui() -> void:
 
 	var controls := Label.new()
 	controls.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	controls.text = "Controls: WASD move, Shift sprint or descend in godmode, Space jump or ascend in godmode, E interact, Left Mouse melee, Right Mouse continuity pulse, Q tonic, F aether, Tab minimap, F3 join debug, F4 print join report, F10 godmode, Esc pause. Inspect Joins enters a reproducible debug preview for the current seed."
+	controls.text = "Controls: WASD move, Arrow Keys look, Shift sprint or descend in godmode, Space jump or ascend in godmode, E interact, Left Mouse melee, Right Mouse continuity pulse, Q tonic, F aether, Tab minimap, F3 join debug, F4 print join report, F10 godmode, Esc pause. Inspect Joins enters a reproducible debug preview for the current seed."
 	controls.add_theme_color_override("font_color", Color(0.74, 0.8, 0.84))
 	menu_vbox.add_child(controls)
 
@@ -766,13 +766,17 @@ func _clear_play_world() -> void:
 
 func _ensure_input_actions() -> void:
 	_add_action_key("move_forward", KEY_W)
-	_add_action_key("move_forward", KEY_UP)
 	_add_action_key("move_backward", KEY_S)
-	_add_action_key("move_backward", KEY_DOWN)
 	_add_action_key("move_left", KEY_A)
-	_add_action_key("move_left", KEY_LEFT)
 	_add_action_key("move_right", KEY_D)
-	_add_action_key("move_right", KEY_RIGHT)
+	_remove_action_key("move_forward", KEY_UP)
+	_remove_action_key("move_backward", KEY_DOWN)
+	_remove_action_key("move_left", KEY_LEFT)
+	_remove_action_key("move_right", KEY_RIGHT)
+	_add_action_key("look_up", KEY_UP)
+	_add_action_key("look_down", KEY_DOWN)
+	_add_action_key("look_left", KEY_LEFT)
+	_add_action_key("look_right", KEY_RIGHT)
 	_add_action_key("jump", KEY_SPACE)
 	_add_action_key("sprint", KEY_SHIFT)
 	_add_action_key("interact", KEY_E)
@@ -795,6 +799,16 @@ func _add_action_key(action: StringName, keycode: Key) -> void:
 	var key_event := InputEventKey.new()
 	key_event.keycode = keycode
 	InputMap.action_add_event(action, key_event)
+
+func _remove_action_key(action: StringName, keycode: Key) -> void:
+	if not InputMap.has_action(action):
+		return
+	var events_to_remove: Array[InputEvent] = []
+	for event in InputMap.action_get_events(action):
+		if event is InputEventKey and event.keycode == keycode:
+			events_to_remove.append(event)
+	for event in events_to_remove:
+		InputMap.action_erase_event(action, event)
 
 func _add_action_mouse(action: StringName, button_index: MouseButton) -> void:
 	if not InputMap.has_action(action):

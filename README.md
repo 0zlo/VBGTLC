@@ -53,7 +53,8 @@ Vault of Bent Geometry That Loads Correctly (VBGTLC) is a Godot 4 vertical slice
 
 ## Controls
 
-- `WASD` / arrow keys: move
+- `WASD`: move
+- `Arrow Keys`: camera look fallback
 - `Shift`: sprint, or descend in godmode
 - `Space`: jump, or ascend in godmode
 - `E`: interact

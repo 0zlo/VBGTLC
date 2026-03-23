@@ -10,6 +10,7 @@ const WALK_SPEED := 5.4
 const SPRINT_SPEED := 8.2
 const JUMP_VELOCITY := 5.2
 const LOOK_SENSITIVITY := 0.0026
+const LOOK_KEY_SPEED := 2.4
 const MELEE_RANGE := 2.0
 const MELEE_COST := 18.0
 const MAGIC_COST := 15.0
@@ -169,7 +170,20 @@ func _physics_process(delta: float) -> void:
 	emit_signal("stats_changed")
 
 func _process(_delta: float) -> void:
+	_process_keyboard_look(_delta)
 	current_focus_target = get_focus_target()
+
+func _process_keyboard_look(delta: float) -> void:
+	if not input_enabled or camera == null:
+		return
+	var yaw_axis := Input.get_action_strength("look_left") - Input.get_action_strength("look_right")
+	var pitch_axis := Input.get_action_strength("look_up") - Input.get_action_strength("look_down")
+	if absf(yaw_axis) < 0.001 and absf(pitch_axis) < 0.001:
+		return
+	yaw += yaw_axis * LOOK_KEY_SPEED * delta
+	pitch = clamp(pitch + pitch_axis * LOOK_KEY_SPEED * delta, -1.35, 1.35)
+	rotation.y = yaw
+	camera.rotation.x = pitch
 
 func _perform_melee() -> void:
 	if melee_cooldown > 0.0:
@@ -358,14 +372,16 @@ func toggle_god_mode() -> void:
 func _process_god_mode_movement(delta: float) -> void:
 	var planar_input := Input.get_vector("move_left", "move_right", "move_forward", "move_backward")
 	var camera_basis := camera.global_basis
-	var flat_forward := -camera_basis.z
-	var flat_right := camera_basis.x
+	var camera_forward := -camera_basis.z
+	var camera_right := camera_basis.x
+	var flat_forward := Vector3(camera_forward.x, 0.0, camera_forward.z).normalized()
+	var flat_right := Vector3(camera_right.x, 0.0, camera_right.z).normalized()
 	var vertical_axis := 0.0
 	if Input.is_action_pressed("jump"):
 		vertical_axis += 1.0
 	if Input.is_action_pressed("sprint"):
 		vertical_axis -= 1.0
-	var move_direction := flat_right * planar_input.x + flat_forward * planar_input.y + Vector3.UP * vertical_axis
+	var move_direction := flat_right * planar_input.x - flat_forward * planar_input.y + Vector3.UP * vertical_axis
 	if move_direction.length_squared() > 0.001:
 		global_position += move_direction.normalized() * GOD_SPEED * delta
 
